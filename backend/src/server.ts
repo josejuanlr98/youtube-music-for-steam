@@ -60,7 +60,12 @@ async function main() {
 
   // Create the YouTube Cast Receiver
   const deviceName = (process.env.YTCAST_DEVICE_NAME || os.hostname()).trim() || os.hostname();
-  const receiver = new YouTubeCastReceiver(castPlayer, {
+  const createReceiver = () => new YouTubeCastReceiver(castPlayer, {
+    app: {
+      // The library defaults to resetting even on temporary sender loss.
+      // Preserve its queue until explicit unlink; our grace handles abandonment.
+      resetPlayerOnDisconnectPolicy: 'allExplicitlyDisconnected',
+    },
     dial: {
       uuid: ssdpUuid,
     } as any,
@@ -71,6 +76,7 @@ async function main() {
     dataStore,
     logLevel: 'info',
   });
+  let receiver = createReceiver();
 
   // Single state model:
   //   - trustedNetworks (persisted) — connection NAMEs the user marked as trusted.
@@ -136,6 +142,7 @@ async function main() {
   // Suppresses repeated identical error messages so retry-spam doesn't
   // flood logs (we retry every 10s on poll).
   let reconcileInflight: Promise<void> = Promise.resolve();
+  let disconnectInflight: Promise<boolean> | null = null;
   let lastReconcileErrorMessage: string | null = null;
   const safeReconcile = (): Promise<void> => {
     if (shuttingDown) return Promise.resolve();
@@ -226,9 +233,13 @@ async function main() {
     handleRequest(req, res, {
       castPlayer,
       libraryPlayer: castPlayer,
-      isConnected: () => receiver.getConnectedSenders().length > 0,
-      senderName: () => activeSenderName,
+      isConnected: () => receiver.getConnectedSenders().length > 0 || reconnectUntil > Date.now(),
+      senderName: () => activeSenderName ?? receiver.getConnectedSenders()[0]?.name?.trim() ?? null,
       disconnectCast: async () => {
+        // Coalesce duplicate Stop requests so an impatient second click cannot
+        // stop the receiver again while it is restarting after the first one.
+        if (disconnectInflight) return disconnectInflight;
+        const unlink = (async () => {
         // Queue unlink alongside network reconciliation so start/stop cannot race.
         const operation = reconcileInflight.then(async () => {
           if (shuttingDown) throw new Error('Receiver is shutting down');
@@ -237,20 +248,40 @@ async function main() {
           boundNetworkUuid = null;
           activeSenderName = null;
           wasConnected = false;
+          reconnectUntil = 0;
+          // yt-cast-receiver persists the MDX screen identity across starts.
+          // On explicit Stop, remove it so the sender cannot silently resume
+          // the just-ended Cast session when advertising comes back.
+          await dataStore.remove('mdxContext.cl');
+          await dataStore.remove('mdxContext.m');
+          await dataStore.flush();
           castPlayer.clearOnDisconnect();
           wsManager.broadcast('connection', { phoneConnected: false, senderName: null });
-          // Re-advertise on the trusted network after ending the current session.
-          await reconcile();
+          // stop()/start() on the same library object retains each Session's
+          // screenId in memory. A fresh receiver instance is required to make
+          // the cleared MDX context take effect immediately.
+          receiver = createReceiver();
+          attachReceiverEvents(receiver);
         });
-        // Keep the queue usable after failures; the network poll retries startup.
-        reconcileInflight = operation.catch(() => {});
+        // Keep Stop pending until the receiver has restarted, and serialize
+        // any network poll behind that restart.
+        reconcileInflight = operation.then(() => reconcile()).catch(err => {
+          console.warn('[YTCast] Receiver restart deferred to network poll:', err);
+        });
         try {
           await operation;
+          await reconcileInflight;
           return true;
         } catch (err) {
           console.error('[YTCast] Failed to disconnect/restart Cast receiver:', err);
           return false;
         }
+        })();
+        disconnectInflight = unlink;
+        void unlink.finally(() => {
+          if (disconnectInflight === unlink) disconnectInflight = null;
+        });
+        return unlink;
       },
       network: networkControl,
     });
@@ -260,15 +291,20 @@ async function main() {
   // and the periodic health check to stay in sync.
   let wasConnected = false;
   let activeSenderName: string | null = null;
+  let reconnectUntil = 0;
+  const RECONNECT_GRACE_MS = 90000;
 
-  // Receiver events
-  receiver.on('senderConnect', (sender) => {
+  // Receiver events are attached to each instance because explicit Stop
+  // rebuilds the receiver to discard its in-memory Cast screen identities.
+  const onSenderConnect = (sender: any) => {
     console.log(`[YTCast] Phone connected: ${sender.name}`);
-    wsManager.broadcast('senderConnected', { senderName: sender.name ?? null });
+    wsManager.broadcast('senderConnected', { senderName: sender.name ?? null, avatar:sender.user?.thumbnail ?? null });
     activeSenderName = sender.name ?? null;
     wsManager.broadcast('connection', { phoneConnected: true, senderName: activeSenderName });
     wasConnected = true;
+    reconnectUntil = 0;
     castPlayer.markSenderActivity(); // seed idle clock so health check doesn't fire before first cast command
+    void castPlayer.syncSender(castPlayer.getPlaybackId()).catch(err => console.warn('[YTCast] Reconnect state sync failed:', err));
 
     // The phone sends its own volume (usually 100%) on connect, overriding
     // our persisted volume. After the connection settles, push our saved
@@ -280,12 +316,36 @@ async function main() {
         await castPlayer.setVolume(savedVol);
       }
     }, 2000);
-  });
+  };
 
-  receiver.on('senderDisconnect', (sender, implicit) => {
+  // Recover a reconnect if the receiver's senderConnect event was missed
+  // while it restarted after Stop. This only broadcasts on a real transition
+  // or when the newly connected sender's name becomes available.
+  const syncSenderIdentity = () => {
+    if (shuttingDown) return;
+    const sender = receiver.getConnectedSenders()[0];
+    if (!sender) return;
+    const name = sender.name?.trim() || null;
+    if (wasConnected && (!name || name === activeSenderName)) return;
+    console.log('[YTCast] Recovered sender identity: ' + (name ?? '(unnamed)'));
+    if (name) activeSenderName = name;
+    wasConnected = true;
+    reconnectUntil = 0;
+    castPlayer.markSenderActivity();
+    wsManager.broadcast('senderConnected', { senderName:name, avatar:sender.user?.thumbnail ?? null });
+    wsManager.broadcast('connection', { phoneConnected:true, senderName:activeSenderName });
+  };
+
+  const onSenderDisconnect = (sender: any, implicit: boolean) => {
     console.log(`[YTCast] Phone disconnected: ${sender.name} (implicit: ${implicit})`);
     const connectedSenders = receiver.getConnectedSenders();
     const stillConnected = connectedSenders.length > 0;
+    if (!stillConnected && implicit) {
+      // A transient Lounge connection loss is not an explicit Stop from the phone.
+      reconnectUntil = Date.now() + RECONNECT_GRACE_MS;
+      return;
+    }
+    reconnectUntil = 0;
     activeSenderName = connectedSenders[0]?.name ?? null;
     wsManager.broadcast('connection', { phoneConnected: stillConnected, senderName: activeSenderName });
     if (!stillConnected) {
@@ -293,7 +353,7 @@ async function main() {
       castPlayer.clearOnDisconnect();
       wasConnected = false;
     }
-  });
+  };
 
   // Subscribe to Playlist events for real-time queue broadcasts
   const broadcastQueue = () => {
@@ -311,9 +371,16 @@ async function main() {
   playlist.on('videoSelected', broadcastQueue);
   playlist.on('playlistAdded', broadcastQueue);
 
-  receiver.on('error', (error) => {
+  const onReceiverError = (error: Error) => {
     console.error('[YTCast] Receiver error:', error);
-  });
+  };
+
+  const attachReceiverEvents = (target: typeof receiver) => {
+    target.on('senderConnect', onSenderConnect);
+    target.on('senderDisconnect', onSenderDisconnect);
+    target.on('error', onReceiverError);
+  };
+  attachReceiverEvents(receiver);
 
   // Start the HTTP/WS server
   await new Promise<void>((resolve, reject) => {
@@ -414,11 +481,9 @@ async function main() {
     const drift = now - lastTick;
     lastTick = now;
     if (drift > 15000) { // 5s interval + 10s tolerance
-      console.log(`[YTCast] Sleep detected (drift: ${Math.round(drift / 1000)}s). Clearing playback.`);
-      activeSenderName = null;
-      wsManager.broadcast('connection', { phoneConnected: false, senderName: null });
-      castPlayer.clearOnDisconnect();
-      wasConnected = false;
+      // Timer drift can also be CPU contention while gaming. Give the receiver
+      // time to reconnect after wake instead of treating drift as a user Stop.
+      if (wasConnected) reconnectUntil = Date.now() + RECONNECT_GRACE_MS;
     }
   }, 5000));
 
@@ -436,18 +501,21 @@ async function main() {
 
     // Case 1: Library now reports 0 senders but we thought we had one
     if (wasConnected && !sendersNow) {
+      if (!reconnectUntil) { reconnectUntil = Date.now() + RECONNECT_GRACE_MS; return; }
+      if (Date.now() < reconnectUntil) return;
       console.log('[YTCast] Health check: senders dropped to 0, clearing playback');
       activeSenderName = null;
       wsManager.broadcast('connection', { phoneConnected: false, senderName: null });
       castPlayer.clearOnDisconnect();
       wasConnected = false;
+      reconnectUntil = 0;
       return;
     }
 
     // Case 2: Stale session — library says connected but no sender activity
     // for 5 minutes AND playback is stopped (active playback = session alive)
     if (wasConnected && !castPlayer.isCurrentlyPlaying() && castPlayer.getSenderIdleMs() > STALE_SESSION_MS) {
-      console.log('[YTCast] Health check: no sender activity for 5m, clearing stale session');
+      console.log('[YTCast] Health check: no sender activity for 30m, clearing stale session');
       activeSenderName = null;
       wsManager.broadcast('connection', { phoneConnected: false, senderName: null });
       castPlayer.clearOnDisconnect();
@@ -455,8 +523,11 @@ async function main() {
       return;
     }
 
+    if (sendersNow) reconnectUntil = 0;
     wasConnected = sendersNow;
   }, 30000)); // Check every 30s
+
+  intervals.push(setInterval(syncSenderIdentity, 2000));
 
   // Network change detection — poll the active connection every 10s.
   // If the network changes (different UUID, or appeared/disappeared),

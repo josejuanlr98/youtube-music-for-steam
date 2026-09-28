@@ -7,6 +7,9 @@ import shutil
 import signal
 import subprocess
 import logging
+import threading
+import time
+import re
 import base64
 import urllib.parse
 import urllib.request
@@ -46,6 +49,7 @@ class Plugin:
     node_process = None
     authenticated = False
     ytmusic = None
+    _auth_generation = 0
 
     # Queue / playback state
     queue = []
@@ -90,21 +94,77 @@ class Plugin:
             decky.logger.debug(f"Artwork palette fallback failed: {error}")
             return {}
 
+    def _account_lock(self):
+        if not hasattr(self, '_ytm_lock'):
+            self._ytm_lock = threading.RLock()
+        return self._ytm_lock
+
+    async def _api_call(self, method, *args, **kwargs):
+        # requests.Session and ytmusicapi's mutable headers must not race.
+        client = self.ytmusic
+        if client is None:
+            raise RuntimeError('Not authenticated')
+        # Full playlist continuations must not monopolize the interactive
+        # account session. Give that one bulk request a separate HTTP session.
+        from ytmusicapi import YTMusic
+        bulk = method in ('get_playlist', 'get_liked_songs') and kwargs.get('limit', 1) is None
+        if bulk and isinstance(client, YTMusic):
+            with self._account_lock():
+                headers = dict(client._auth_headers)
+            def read_bulk():
+                candidate = YTMusic(headers)
+                try:
+                    return getattr(candidate, method)(*args, **kwargs)
+                finally:
+                    candidate._session.close()
+            return await asyncio.to_thread(read_bulk)
+        def invoke():
+            from requests.exceptions import ConnectionError, Timeout
+            with self._account_lock():
+                for attempt in range(2):
+                    try:
+                        return getattr(client, method)(*args, **kwargs)
+                    except (ConnectionError, Timeout):
+                        if attempt:
+                            raise
+        return await asyncio.to_thread(invoke)
+
+    @staticmethod
+    def _account_error(error):
+        from requests.exceptions import ConnectionError, Timeout
+        status = getattr(getattr(error, 'response', None), 'status_code', None)
+        message = str(error).lower()
+        http_status = re.search(r'http\s+(401|403)\b', message)
+        if status is None and http_status:
+            status = int(http_status.group(1))
+        if status == 401 or any(term in message for term in ('sign in', 'login_required', 'unauthenticated')):
+            return {'error': 'YouTube rejected this session. Update your browser headers in Settings.', 'authRequired': True}
+        if isinstance(error, (ConnectionError, Timeout)):
+            return {'error': 'Could not reach YouTube Music. Check your connection and retry.'}
+        if isinstance(error, (KeyError, TypeError, IndexError)):
+            return {'error': 'YouTube returned an unexpected response. Retry or refresh Library. Your saved session has been kept.'}
+        if status == 403:
+            return {'error': 'YouTube denied access to this item. Check that it is available for your account.'}
+        return {'error': 'Could not load this item from YouTube Music. Please retry. Your saved session has been kept.'}
+
     # ── Authentication (browser cookies) ───────────────────────────
 
     def _try_init_ytmusic(self):
         """Initialize ytmusicapi using browser request headers (cookies)."""
+        generation = self._auth_generation
         if os.path.exists(BROWSER_AUTH_FILE):
             try:
                 from ytmusicapi import YTMusic
-                self.ytmusic = YTMusic(BROWSER_AUTH_FILE)
-                self.authenticated = True
-                decky.logger.info("ytmusicapi initialized with browser auth")
+                candidate = YTMusic(BROWSER_AUTH_FILE)
+                if generation == self._auth_generation:
+                    self.ytmusic = candidate
+                    self.authenticated = True
                 return
             except Exception as e:
-                decky.logger.error(f"Failed to init ytmusicapi: {e}")
-        self.authenticated = False
-        self.ytmusic = None
+                decky.logger.warning(f'Could not initialize saved account: {type(e).__name__}')
+        if generation == self._auth_generation:
+            self.authenticated = False
+            self.ytmusic = None
 
     def _load_settings(self):
         """Load persisted settings (volume, etc.) from disk."""
@@ -158,7 +218,7 @@ class Plugin:
     async def _main(self):
         decky.logger.info("YouTube Music plugin loaded")
         self._load_settings()
-        self._try_init_ytmusic()
+        await asyncio.to_thread(self._try_init_ytmusic)
         await self._start_cast_backend()
 
     async def _start_cast_backend(self):
@@ -253,6 +313,17 @@ class Plugin:
                 pass
         self.node_process = None
 
+    async def hard_reset(self):
+        """Restart the integrated Cast receiver and clear transient playback state."""
+        try:
+            await self.stop_all()
+            await self._stop_cast_backend()
+            await self._start_cast_backend()
+            return {'success': True}
+        except Exception as error:
+            decky.logger.error(f"Hard reset failed: {error}")
+            return {'success': False, 'error': 'Could not restart the Cast receiver.'}
+
     async def _unload(self):
         decky.logger.info("Stopping integrated YouTube Cast Receiver...")
         await self._stop_cast_backend()
@@ -281,12 +352,16 @@ class Plugin:
 
     async def get_auth_state(self):
         """Return current browser-cookie authentication status."""
+        if self.ytmusic is None and os.path.exists(BROWSER_AUTH_FILE):
+            await asyncio.to_thread(self._try_init_ytmusic)
         return {"authenticated": self.authenticated}
 
     async def load_headers_from_file(self, file_path: str):
         """Read browser request headers from a text file on the Deck.
         Uses ytmusicapi.setup() to parse raw headers into browser.json.
         """
+        self._auth_generation += 1
+        generation = self._auth_generation
         try:
             if not os.path.exists(file_path):
                 return {"error": f"File not found: {file_path}"}
@@ -298,20 +373,67 @@ class Plugin:
                 return {"error": "File is empty"}
 
             from ytmusicapi import setup
-            os.makedirs(decky.DECKY_PLUGIN_SETTINGS_DIR, exist_ok=True)
-            setup(filepath=BROWSER_AUTH_FILE, headers_raw=headers_raw)
-            decky.logger.info(f"Browser headers loaded from {file_path}")
-
-            self._try_init_ytmusic()
-            if self.authenticated:
-                return {"success": True}
-            return {"error": "Headers saved but initialization failed. Check that the headers are correct."}
+            # Parse and validate before replacing a working account or its file.
+            parsed = json.loads(setup(headers_raw=headers_raw))
+            return await self._install_browser_auth(parsed, generation)
         except Exception as e:
-            decky.logger.error(f"Failed to load headers from file: {e}")
-            return {"error": str(e)}
+            decky.logger.warning(f'Header validation failed: {type(e).__name__}')
+            return {'error': 'Could not validate these headers. Check the file and connection, then retry. Your previous session has been kept.'}
+
+    async def import_firefox_session(self):
+        self._auth_generation += 1
+        generation = self._auth_generation
+        try:
+            from ytm_firefox import read_firefox_headers
+            user_home = getattr(decky, 'DECKY_USER_HOME', '/home/deck')
+            parsed = await asyncio.to_thread(read_firefox_headers, user_home)
+            return await self._install_browser_auth(parsed, generation)
+        except ValueError as error:
+            return {'error': str(error)}
+        except Exception as error:
+            decky.logger.warning(f'Firefox import failed: {type(error).__name__}')
+            return {'error': 'Could not import Firefox. Close Firefox after signing in and retry. Your saved session has been kept.'}
+
+    async def _install_browser_auth(self, parsed, generation):
+        try:
+            from ytmusicapi import YTMusic
+            from ytmusicapi.auth.types import AuthType
+            def validate():
+                candidate = YTMusic(parsed)
+                if candidate.auth_type != AuthType.BROWSER:
+                    raise ValueError('Browser authentication required')
+                candidate.get_library_playlists(limit=1)
+                return candidate
+            candidate = await asyncio.to_thread(validate)
+            if generation != self._auth_generation:
+                return {'error': 'Account changed while validating. Please retry.'}
+            os.makedirs(decky.DECKY_PLUGIN_SETTINGS_DIR, exist_ok=True)
+            temporary = BROWSER_AUTH_FILE + '.tmp'
+            try:
+                with open(temporary, 'w', encoding='utf-8') as output:
+                    json.dump(parsed, output)
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, BROWSER_AUTH_FILE)
+            finally:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            self.ytmusic = candidate
+            self._ratings = {}
+            self._rating_checked = {}
+            self.authenticated = True
+            self._cached_playlists = None
+            self._playlist_tracks_cache = {}
+            self._playlist_preview_cache = {}
+            return {'success': True}
+        except Exception as e:
+            decky.logger.warning(f'Header validation failed: {type(e).__name__}')
+            return {'error': 'Could not validate these headers. Check the file and connection, then retry. Your previous session has been kept.'}
 
     async def sign_out(self):
         """Sign out — delete browser.json and reset all authentication state."""
+        self._auth_generation += 1
+        self._ratings = {}
+        self._rating_checked = {}
         self.authenticated = False
         self.ytmusic = None
         self.queue = []
@@ -348,6 +470,9 @@ class Plugin:
             # SteamOS Python environments carrying an obsolete yt-dlp module.
             ytdlp = YTDLP_BIN if os.path.exists(YTDLP_BIN) else None
             command = ([ytdlp] if ytdlp else ['python3', '-m', 'yt_dlp']) + [
+                '--ignore-config', '--socket-timeout', '15', '--retries', '1',
+                '--js-runtimes', 'node:' + (NODE_BIN if os.path.exists(NODE_BIN) else NODE_BIN_SRC),
+                '--remote-components', 'ejs:github',
                 '--print', 'urls',
                 '-f', 'bestaudio[ext=m4a]/bestaudio',
                 '--no-warnings',
@@ -361,7 +486,9 @@ class Plugin:
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=30,
+                # Keep a single bad/blocked video from delaying playlist start
+                # for nearly a minute before the next candidate is tried.
+                timeout=25,
             )
 
             url = result.stdout.strip()
@@ -377,13 +504,13 @@ class Plugin:
             decky.logger.error(f"Failed to get streaming URL for {video_id}: {e}")
             return None
 
-    def _current_track_with_url(self):
+    def _current_track_with_url(self, resolve_url=True):
         """Return current track metadata + fresh streaming URL."""
         if not self.queue or self.queue_position >= len(self.queue):
             return None
 
         track = self.queue[self.queue_position]
-        url = self._get_streaming_url(track["videoId"])
+        url = self._get_streaming_url(track["videoId"]) if resolve_url else None
 
         return {
             "videoId": track["videoId"],
@@ -401,27 +528,25 @@ class Plugin:
 
     async def get_current_track(self):
         """Return current track with fresh streaming URL."""
-        result = self._current_track_with_url()
-        if result is None:
-            return {"error": "No track in queue"}
-        if result["url"] is None:
-            return {"error": "Failed to get streaming URL"}
-        return result
+        if not self.queue:
+            return {'error': 'No track in queue'}
+        return await self.jump_to_queue(self.queue_position)
 
     async def resume(self):
         self.is_playing = True
         return {"success": True}
 
     async def pause(self):
+        self._pause_revision = getattr(self, '_pause_revision', 0) + 1
         self.is_playing = False
         return {"success": True}
 
-    def _advance_queue(self, direction=1):
+    def _advance_queue(self, direction=1, resolve_url=True):
         if not self.queue:
             return None
 
         if self.repeat == "ONE":
-            return self._current_track_with_url()
+            return self._current_track_with_url(resolve_url)
 
         if self.shuffle and self.shuffle_order:
             try:
@@ -460,23 +585,58 @@ class Plugin:
                     self.queue_position = 0
 
         self.is_playing = True
-        return self._current_track_with_url()
+        return self._current_track_with_url(resolve_url)
+
+    async def _advance_async(self, direction):
+        previous = self.queue_position
+        playing = self.is_playing
+        snapshot = self.queue
+        result = self._advance_queue(direction, resolve_url=False)
+        if result is None:
+            return {'stopped': True}
+        target = self.queue_position
+        url = await asyncio.to_thread(self._get_streaming_url, result['videoId'])
+        if self.queue is not snapshot or self.queue_position != target:
+            return {'error': 'Playback changed while loading.'}
+        if not url:
+            self.queue_position = previous
+            self.is_playing = playing
+            return {'error': 'Could not load audio for this song. Please retry.'}
+        return {**result, 'url': url}
 
     async def next_track(self):
-        result = self._advance_queue(1)
-        if result is None:
-            return {"stopped": True}
-        if result.get("url") is None:
-            return {"error": "Failed to get streaming URL"}
+        result = await self._advance_async(1)
+        if result.get('error') == 'Could not load audio for this song. Please retry.':
+            return await self.skip_unplayable()
         return result
 
+    async def skip_unplayable(self, video_id=None):
+        if not self.queue or (video_id and self.queue[self.queue_position]['videoId'] != video_id):
+            return {'stopped': True}
+        queue = self.queue
+        pause_revision = getattr(self, '_pause_revision', 0)
+        repeat = self.repeat
+        self.repeat = 'NONE'
+        try:
+            for _ in range(min(5, len(queue))):
+                track = self._advance_queue(1, resolve_url=False)
+                if not track:
+                    self.is_playing = False
+                    return {'stopped': True}
+                target = self.queue_position
+                url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+                if self.queue is not queue or self.queue_position != target or pause_revision != getattr(self, '_pause_revision', 0):
+                    return {'error': 'Playback changed while skipping.'}
+                if url:
+                    return {**track, 'url': url}
+            self.is_playing = False
+            return {'stopped': True, 'error': 'Several songs could not be played. Check your connection.'}
+        finally:
+            if self.queue is queue and self.repeat == 'NONE':
+                self.repeat = repeat
+
     async def previous_track(self):
-        result = self._advance_queue(-1)
-        if result is None:
-            return {"stopped": True}
-        if result.get("url") is None:
-            return {"error": "Failed to get streaming URL"}
-        return result
+        return await self._advance_async(-1)
 
     async def track_ended(self):
         return await self.next_track()
@@ -554,7 +714,18 @@ class Plugin:
         if not self.ytmusic:
             return {"error": "Not authenticated"}
         try:
-            self.ytmusic.rate_song(video_id, rating)
+            if rating not in ('LIKE', 'DISLIKE', 'INDIFFERENT') or not video_id:
+                return {"error": "Invalid rating"}
+            client = self.ytmusic
+            await self._api_call('rate_song', video_id, rating)
+            if self.ytmusic is not client:
+                return {"error": "Account changed. Please retry."}
+            ratings = getattr(self, '_ratings', {})
+            if len(ratings) >= 256 and video_id not in ratings:
+                ratings.pop(next(iter(ratings)))
+            ratings[video_id] = rating
+            self._ratings = ratings
+            getattr(self, '_rating_checked', {}).pop(video_id, None)
             # Update the cached likeStatus in the queue
             for t in self.queue:
                 if t.get("videoId") == video_id:
@@ -568,11 +739,40 @@ class Plugin:
             return {"error": error_msg}
 
     async def get_song_rating(self, video_id):
+        if video_id in getattr(self, '_ratings', {}):
+            return {"rating": self._ratings[video_id]}
         # Return cached likeStatus from queue data
         for t in self.queue:
             if t.get("videoId") == video_id:
-                return {"rating": t.get("likeStatus", "INDIFFERENT")}
-        return {"rating": "INDIFFERENT"}
+                status = t.get("likeStatus")
+                if status and status != "INDIFFERENT":
+                    return {"rating": status}
+                break
+        # Cast songs are not in the local queue, so ask YouTube Music once per
+        # song. Its watch endpoint cannot tell DISLIKE from INDIFFERENT, so only
+        # LIKE is trusted; results (including "not liked") are cached.
+        if not self.ytmusic or not isinstance(video_id, str) or not re.fullmatch(r'[\w-]{1,64}', video_id):
+            return {"rating": "INDIFFERENT"}
+        checked = getattr(self, '_rating_checked', None)
+        if checked is None:
+            checked = self._rating_checked = {}
+        if video_id in checked:
+            return {"rating": checked[video_id]}
+        client = self.ytmusic
+        try:
+            watch = await self._api_call('get_watch_playlist', videoId=video_id, limit=1)
+            if self.ytmusic is not client:
+                return {"rating": "INDIFFERENT"}
+            tracks = (watch or {}).get('tracks') or []
+            match = next((x for x in tracks if x.get('videoId') == video_id), None)
+            rating = 'LIKE' if match and match.get('likeStatus') == 'LIKE' else 'INDIFFERENT'
+        except Exception as e:
+            decky.logger.warning(f"Could not read rating for {video_id}: {type(e).__name__}")
+            return {"rating": "INDIFFERENT"}
+        if len(checked) >= 256:
+            checked.pop(next(iter(checked)))
+        checked[video_id] = rating
+        return {"rating": getattr(self, '_ratings', {}).get(video_id, rating)}
 
     # ── Shuffle / Repeat ───────────────────────────────────────────
 
@@ -614,8 +814,11 @@ class Plugin:
 
     async def get_queue(self):
         return {
+            'loading': getattr(self, '_queue_loading', None) is self.queue,
+            'loadError': getattr(self, '_queue_load_error', ''),
             "tracks": self.queue,
             "position": self.queue_position,
+            "shuffle": self.shuffle, "shuffleOrder": list(self.shuffle_order), "repeat": self.repeat,
         }
 
     async def edit_queue(self, index, action, expected_ids):
@@ -650,7 +853,13 @@ class Plugin:
             self.repeat = "NONE"
         return {"success": True, "tracks": self.queue, "position": self.queue_position, "repeat": self.repeat}
 
-    async def remove_from_queue(self, index):
+    async def remove_from_queue(self, index, expected_ids=None):
+        if expected_ids is not None and expected_ids != [t.get('videoId') for t in self.queue]:
+            return {'error': 'Queue changed. Please try again.'}
+        if type(index) is not int:
+            return {'error': 'Invalid index'}
+        if self.is_playing and index == self.queue_position:
+            return {'error': 'Skip this song before removing it.'}
         if index < 0 or index >= len(self.queue):
             return {"error": "Invalid index"}
 
@@ -671,15 +880,20 @@ class Plugin:
 
         return {"success": True, "queue_length": len(self.queue)}
 
-    async def jump_to_queue(self, index):
-        if index < 0 or index >= len(self.queue):
-            return {"error": "Invalid index"}
-
+    async def jump_to_queue(self, index, expected_ids=None):
+        if expected_ids is not None and expected_ids != [t.get('videoId') for t in self.queue]:
+            return {'error': 'Queue changed. Please try again.'}
+        if type(index) is not int or not 0 <= index < len(self.queue):
+            return {'error': 'Invalid index'}
+        snapshot = self.queue
+        track = snapshot[index]
+        url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+        if snapshot is not self.queue or index >= len(self.queue) or self.queue[index] is not track:
+            return {'error': 'Queue changed. Please try again.'}
+        if not url:
+            return {'error': 'Could not load audio. Your current song has been kept.'}
         self.queue_position = index
-        result = self._current_track_with_url()
-        if result is None or result.get("url") is None:
-            return {"error": "Failed to get streaming URL"}
-        return result
+        return {**track, 'url': url, 'queuePosition': index, 'queueLength': len(self.queue)}
 
     # ── Library ─────────────────────────────────────────────────────
 
@@ -688,10 +902,15 @@ class Plugin:
     async def get_library_playlists(self, refresh=False):
         if not self.ytmusic:
             return {"error": "Not authenticated"}
+        if refresh:
+            self._playlist_tracks_cache = {}
+            self._playlist_preview_cache = {}
+            self._playlist_start_urls = {}
         if self._cached_playlists and not refresh:
             return {"playlists": self._cached_playlists}
         try:
-            playlists = self.ytmusic.get_library_playlists(limit=None)
+            client = self.ytmusic
+            playlists = await self._api_call('get_library_playlists', limit=None)
             result = []
             # Liked Songs first
             result.append({
@@ -712,14 +931,13 @@ class Plugin:
                     "count": p.get("count"),
                     "thumbnail": thumb,
                 })
+            if self.ytmusic is not client:
+                return {'error': 'Account changed. Please reload Library.'}
             self._cached_playlists = result
             return {"playlists": result}
         except Exception as e:
             decky.logger.error(f"Failed to get library playlists: {e}")
-            error_msg = str(e)
-            if "Sign in" in error_msg or "sign in" in error_msg or "twoColumnBrowseResultsRenderer" in error_msg:
-                return {"error": "Session expired. Please re-authenticate with fresh browser headers in Settings."}
-            return {"error": error_msg}
+            return self._account_error(e)
 
     # ── Search ─────────────────────────────────────────────────────
 
@@ -727,7 +945,9 @@ class Plugin:
         if not self.ytmusic:
             return {"error": "Not authenticated"}
         try:
-            results = self.ytmusic.search(query, filter="songs", limit=20)
+            if not isinstance(query, str) or not query.strip():
+                return {'results': []}
+            results = await self._api_call('search', query.strip()[:200], filter='songs', limit=20)
             songs = []
             for r in results:
                 thumbnails = r.get("thumbnails", [])
@@ -744,9 +964,12 @@ class Plugin:
             return {"results": [s for s in songs if s["videoId"]]}
         except Exception as e:
             decky.logger.error(f"Search failed: {e}")
-            return {"error": str(e)}
+            return self._account_error(e)
 
-    async def queue_song_next(self, metadata):
+    async def queue_song_append(self, metadata):
+        return await self.queue_song_next(metadata, append=True)
+
+    async def queue_song_next(self, metadata, append=False):
         if not self.ytmusic:
             return {"error": "Not authenticated"}
         if not isinstance(metadata, dict) or not metadata.get('videoId'):
@@ -762,16 +985,16 @@ class Plugin:
         if not self.queue:
             self.queue_position = 0
             self.shuffle_order = []
-        index = self.queue_position + 1 if self.queue else 0
+        index = len(self.queue) if append else self.queue_position + 1 if self.queue else 0
         self.queue.insert(index, track)
         if self.shuffle:
             order = [i + 1 if i >= index else i for i in self.shuffle_order]
             if not order:
                 order = [i for i in range(len(self.queue)) if i != index]
-            slot = order.index(self.queue_position) + 1 if self.queue_position in order else 0
+            slot = len(order) if append else order.index(self.queue_position) + 1 if self.queue_position in order else 0
             order.insert(slot, index)
             self.shuffle_order = order
-        if self.repeat == 'ONE':
+        if self.repeat == 'ONE' and not append:
             self.repeat = 'NONE'
         return {"success": True}
 
@@ -798,7 +1021,12 @@ class Plugin:
             "likeStatus": "INDIFFERENT",
         }
         try:
-            url = self._get_streaming_url(video_id)
+            original_queue = self.queue
+            snapshot = list(self.queue)
+            client = self.ytmusic
+            url = await asyncio.to_thread(self._get_streaming_url, video_id)
+            if self.queue is not original_queue or self.queue != snapshot or client is not self.ytmusic:
+                return {'error': 'Playback changed. Please select the song again.'}
             if not url:
                 return {"error": "YouTube did not provide an audio stream for this song. Please try again in a moment."}
             self.queue = [track]
@@ -927,6 +1155,7 @@ class Plugin:
         return await asyncio.to_thread(self._lyrics_resolver.resolve, video_id, metadata)
 
     async def stop_all(self):
+        self._queue_load_error = ''
         self.queue = []
         self.queue_position = 0
         self.shuffle_order = []
@@ -935,79 +1164,199 @@ class Plugin:
 
     # ── Playlist loading ─────────────────────────────────────────────
 
-    async def load_playlist(self, playlist_id):
+    @staticmethod
+    def _playlist_track(t):
+        if not isinstance(t, dict) or not t.get('videoId') or t.get('isAvailable') is False:
+            return None
+        thumbs = t.get('thumbnails') or []
+        artists = t.get('artists') or []
+        album = t.get('album') or {}
+        duration = t.get('duration_seconds') or 0
+        if not duration:
+            try:
+                for part in str(t.get('duration') or '0').split(':'):
+                    duration = duration * 60 + int(part)
+            except (ValueError, TypeError):
+                duration = 0
+        return {'videoId': t['videoId'], 'title': t.get('title') or 'Unknown',
+                'artist': ', '.join(a.get('name') or '' for a in artists if isinstance(a, dict)),
+                'album': album.get('name', '') if isinstance(album, dict) else '',
+                'albumArt': thumbs[-1].get('url', '') if thumbs else '',
+                'duration': duration, 'likeStatus': t.get('likeStatus') or 'INDIFFERENT'}
+
+    async def get_playlist_tracks(self, playlist_id, limit=None):
         if not self.ytmusic:
-            return {"error": "Not authenticated"}
-
+            return {'error': 'Not authenticated'}
+        if not isinstance(playlist_id, str) or not playlist_id.strip():
+            return {'error': 'No playlist selected'}
+        client = self.ytmusic
         try:
-            self.is_playing = False  # stop old playback state before rebuilding queue
-
-            if playlist_id == "LM":
-                playlist_data = self.ytmusic.get_liked_songs(limit=50)
-            else:
-                playlist_data = self.ytmusic.get_playlist(playlist_id, limit=50)
-
-            tracks = playlist_data.get("tracks", [])
+            # A short, account-scoped cache avoids downloading every continuation
+            # again when the same large playlist is played or appended repeatedly.
+            cache = getattr(self, '_playlist_tracks_cache', {})
+            cached = cache.get(playlist_id)
+            if cached and cached[0] is client and time.monotonic() - cached[1] < 120:
+                return {'tracks': [dict(track) for track in cached[2]]}
+            previews = getattr(self, '_playlist_preview_cache', {})
+            preview = previews.get(playlist_id)
+            if limit == 0 and preview and preview[0] is client and time.monotonic() - preview[1] < 120:
+                return {'tracks': [dict(track) for track in preview[2]]}
+            data = await (self._api_call('get_liked_songs', limit=limit) if playlist_id == 'LM'
+                          else self._api_call('get_playlist', playlist_id, limit=limit))
+            if self.ytmusic is not client:
+                return {'error': 'Account changed. Please reload Library.'}
+            tracks = [track for item in (data.get('tracks') or []) if (track := self._playlist_track(item))]
             if not tracks:
-                return {"error": "Playlist is empty. If this is Liked Songs, try re-authenticating with fresh browser headers."}
-
-            self.queue = []
-            for t in tracks:
-                thumbnails = t.get("thumbnails", [])
-                album_art = thumbnails[-1]["url"] if thumbnails else ""
-
-                artists = t.get("artists", [])
-                artist_name = ", ".join(a.get("name", "") for a in artists) if artists else ""
-
-                album = t.get("album")
-                album_name = album.get("name", "") if album else ""
-
-                duration_seconds = t.get("duration_seconds", 0)
-                if not duration_seconds:
-                    duration_str = t.get("duration", "0:00")
-                    parts = duration_str.split(":")
-                    try:
-                        if len(parts) == 2:
-                            duration_seconds = int(parts[0]) * 60 + int(parts[1])
-                        elif len(parts) == 3:
-                            duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-                    except ValueError:
-                        duration_seconds = 0
-
-                self.queue.append({
-                    "videoId": t.get("videoId", ""),
-                    "title": t.get("title", "Unknown"),
-                    "artist": artist_name,
-                    "album": album_name,
-                    "albumArt": album_art,
-                    "duration": duration_seconds,
-                    "likeStatus": t.get("likeStatus", "INDIFFERENT"),
-                })
-
-            self.queue = [t for t in self.queue if t["videoId"]]
-
-            if not self.queue:
-                return {"error": "No playable tracks in playlist"}
-
-            self.queue_position = 0
-
-            if self.shuffle:
-                self.shuffle_order = list(range(len(self.queue)))
-                random.shuffle(self.shuffle_order)
-                self.shuffle_order.remove(0)
-                self.shuffle_order.insert(0, 0)
-            else:
-                self.shuffle_order = []
-
-            result = self._current_track_with_url()
-            if result is None or result.get("url") is None:
-                return {"error": "Failed to get streaming URL for first track"}
-
-            self.is_playing = True
-            return result
+                return {'error': 'This playlist has no available songs.'}
+            cache = {key: value for key, value in cache.items()
+                     if value[0] is client and time.monotonic() - value[1] < 120}
+            while len(cache) >= 3:
+                cache.pop(next(iter(cache)))
+            if limit is None:
+                cache[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
+            self._playlist_tracks_cache = cache
+            if limit == 0:
+                previews = {key:value for key,value in previews.items() if value[0] is client and time.monotonic() - value[1] < 120}
+                while len(previews) >= 6:
+                    previews.pop(next(iter(previews)))
+                previews[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
+                self._playlist_preview_cache = previews
+            return {'tracks': tracks}
         except Exception as e:
-            decky.logger.error(f"Failed to load playlist {playlist_id}: {e}")
-            error_msg = str(e)
-            if "Sign in" in error_msg or "sign in" in error_msg or "twoColumnBrowseResultsRenderer" in error_msg:
-                return {"error": "Session expired. Please re-authenticate with fresh browser headers in Settings."}
-            return {"error": error_msg}
+            decky.logger.warning(f'Playlist load failed: {type(e).__name__}')
+            return self._account_error(e)
+
+    async def append_playlist(self, playlist_id):
+        data = await self.get_playlist_tracks(playlist_id)
+        if 'error' in data:
+            return data
+        tracks = data['tracks']
+        old_length = len(self.queue)
+        self.queue.extend(tracks)
+        if old_length == 0:
+            self.queue_position = 0
+            self.shuffle_order = []
+        if self.shuffle:
+            additions = list(range(old_length, len(self.queue)))
+            random.shuffle(additions)
+            self.shuffle_order = (self.shuffle_order or list(range(old_length))) + additions
+        return {'success': True, 'added': len(tracks)}
+
+    async def start_playlist(self, playlist_id, shuffle=False):
+        return await self.load_playlist(playlist_id, shuffle, initial=True)
+
+    async def complete_playlist(self, playlist_id, initial_ids, shuffle=False):
+        if not isinstance(initial_ids, list) or sorted(initial_ids) != sorted(t['videoId'] for t in self.queue):
+            return {'error': 'Playback changed.'}
+        queue, client = self.queue, self.ytmusic
+        self._queue_loading = queue
+        self._queue_load_error = ''
+        try:
+            data = await self.get_playlist_tracks(playlist_id)
+            if self.queue is not queue or self.ytmusic is not client:
+                return {'error': 'Playback changed.'}
+            if data.get('error'):
+                self._queue_load_error = data['error']
+                return data
+            tracks = data['tracks']
+            if [t['videoId'] for t in tracks[:len(initial_ids)]] != initial_ids:
+                self._queue_load_error = 'Playlist changed on YouTube. Replay it to reload all tracks.'
+                return {'error': self._queue_load_error}
+            rest = tracks[len(initial_ids):]
+            if shuffle:
+                random.shuffle(rest)
+            start = len(queue)
+            queue.extend(rest)
+            if self.shuffle:
+                self.shuffle_order.extend(range(start, len(queue)))
+            return {'success': True, 'added': len(rest)}
+        finally:
+            if getattr(self, '_queue_loading', None) is queue:
+                self._queue_loading = None
+
+    async def queue_playlist_next(self, playlist_id):
+        queue, client = self.queue, self.ytmusic
+        data = await self.get_playlist_tracks(playlist_id)
+        if data.get('error'):
+            return data
+        if self.queue is not queue or self.ytmusic is not client:
+            return {'error': 'Playback changed.'}
+        tracks = data['tracks']
+        index = self.queue_position + 1 if queue else 0
+        queue[index:index] = tracks
+        if self.shuffle:
+            order = [i + len(tracks) if i >= index else i for i in self.shuffle_order]
+            slot = order.index(self.queue_position) + 1 if self.queue_position in order else 0
+            order[slot:slot] = range(index, index + len(tracks))
+            self.shuffle_order = order
+        if self.repeat == 'ONE':
+            self.repeat = 'NONE'
+        return {'success': True, 'added': len(tracks)}
+
+    async def load_playlist(self, playlist_id, shuffle=False, initial=False):
+        original_queue = self.queue
+        snapshot = list(self.queue)
+        client = self.ytmusic
+        # ytmusicapi parses the first page before applying this limit to
+        # continuations. Zero returns that page without an extra network round trip.
+        data = await self.get_playlist_tracks(playlist_id, limit=0 if initial else None)
+        if 'error' in data:
+            return data
+        tracks = data['tracks']
+        initial_ids = [t['videoId'] for t in tracks]
+        if shuffle:
+            random.shuffle(tracks)
+        # Resolve before committing. Failed extraction never destroys the old queue.
+        start_index = 0
+        url = None
+        # Playlists frequently begin with unavailable/kids/region-blocked
+        # uploads. Probe a wider window, but keep the bound predictable.
+        candidate_limit = min(20, len(tracks))
+        failed_ids = []
+        starts = getattr(self, '_playlist_start_urls', {})
+        for start_index in range(candidate_limit):
+            video_id = tracks[start_index]['videoId']
+            cached_start = starts.get(video_id)
+            url = (cached_start[2] if cached_start and cached_start[0] is client and time.monotonic() - cached_start[1] < 60
+                   else await asyncio.to_thread(self._get_streaming_url, video_id))
+            if self.queue is not original_queue or self.queue != snapshot or self.ytmusic is not client:
+                return {'error': 'Playback changed while loading.'}
+            if url:
+                starts = {key:value for key,value in starts.items() if value[0] is client and time.monotonic() - value[1] < 60}
+                if len(starts) >= 12:
+                    starts.pop(next(iter(starts)))
+                starts[video_id] = (client, time.monotonic(), url)
+                self._playlist_start_urls = starts
+                break
+            failed_ids.append(tracks[start_index]['videoId'])
+        if not url:
+            decky.logger.warning(f"No playable track found in first {candidate_limit} playlist candidates: {failed_ids}")
+            return {'error': 'Could not find a playable song near the start of this playlist. The current queue was kept. Try another song or Shuffle.'}
+        if self.queue is not original_queue or self.queue != snapshot or self.ytmusic is not client:
+            return {'error': 'Playback changed while loading. Please try the playlist again.'}
+        self.queue = tracks
+        self.queue_position = start_index
+        self._queue_load_error = ''
+        self.shuffle = bool(shuffle)
+        self.shuffle_order = list(range(len(tracks))) if shuffle else []
+        self.is_playing = True
+        return {**tracks[start_index], 'url': url, 'queuePosition': start_index, 'queueLength': len(tracks),
+                'initialIds': initial_ids if initial else None}
+
+    async def restore_local_queue(self, snapshot):
+        # Cast disconnection broadcasts an empty queue; restore the already prepared local selection.
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('tracks'), list):
+            return {'error': 'Invalid queue'}
+        tracks = snapshot['tracks']
+        position = snapshot.get('position', 0)
+        if not tracks or type(position) is not int or not 0 <= position < len(tracks):
+            return {'error': 'Invalid queue position'}
+        if not all(isinstance(t, dict) and t.get('videoId') for t in tracks):
+            return {'error': 'Invalid song'}
+        self.queue = tracks
+        self.queue_position = position
+        self.shuffle = bool(snapshot.get('shuffle'))
+        order = snapshot.get('shuffleOrder') or []
+        self.shuffle_order = order if sorted(order) == list(range(len(tracks))) else list(range(len(tracks))) if self.shuffle else []
+        self.repeat = snapshot.get('repeat') if snapshot.get('repeat') in ('NONE', 'ALL', 'ONE') else 'NONE'
+        return {'success': True}

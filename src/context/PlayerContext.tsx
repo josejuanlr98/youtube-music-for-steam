@@ -23,6 +23,7 @@ const defaultState: PlayerState = {
   repeat: 'NONE',
   shuffle: false,
   authenticated: false,
+  authReady: false,
   hasCredentials: false,
   castConnected: false,
   castNetwork: { uuid: null, name: null, trusted: false },
@@ -69,7 +70,7 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
   // Sync with audio manager on mount (panel open)
   useEffect(() => {
     const onAuthChanged = (event: Event) => {
-      dispatch({ type:'UPDATE', payload:{ authenticated:(event as CustomEvent<boolean>).detail } });
+      dispatch({ type:'UPDATE', payload:{ authenticated:(event as CustomEvent<boolean>).detail, authReady:true } });
     };
     window.addEventListener('ytm-auth-changed', onAuthChanged);
     // Restore state from audio manager (survives panel close/open)
@@ -104,19 +105,14 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
         console.error('[YTM] Failed to fetch playback state:', e);
       }
 
-      // Fetch auth state
-      try {
-        const auth = await call<[], { authenticated: boolean }>('get_auth_state');
-        dispatch({
-          type: 'UPDATE',
-          payload: {
-            authenticated: auth.authenticated,
-          },
-        });
-      } catch (e) {
-        console.error('[YTM] Failed to fetch auth state:', e);
-      }
     })();
+
+    // Resolve authentication independently from playback state. Until this
+    // succeeds, consumers keep the cast-only/login hint hidden instead of
+    // briefly showing a false "no cookies" state on every panel open.
+    void call<[], { authenticated: boolean }>('get_auth_state').then(auth => {
+      dispatch({ type:'UPDATE', payload:{ authenticated:auth.authenticated, authReady:true } });
+    }).catch(e => console.error('[YTM] Failed to fetch auth state:', e));
 
     // Subscribe to audio manager events
     const removeTrack = addTrackChangeListener((t) => dispatch({ type: 'SET_TRACK', payload: t }));
@@ -127,9 +123,19 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const removeNetwork = addNetworkListener((network) =>
       dispatch({ type: 'UPDATE', payload: { castNetwork: network } })
     );
-    const removeProgress = addProgressListener((position, duration) =>
-      dispatch({ type: 'UPDATE', payload: { position, duration } })
-    );
+    // The compact clock only displays seconds. Lyrics subscribe independently
+    // to precise audio progress, so avoid rerendering every context consumer.
+    let lastSecond = -1, lastDuration = -1;
+    const refreshProgress = (position: number, duration: number) => {
+      if (document.hidden) return;
+      const second = Math.floor(position);
+      if (second === lastSecond && duration === lastDuration) return;
+      lastSecond = second; lastDuration = duration;
+      dispatch({ type:'UPDATE', payload:{ position, duration } });
+    };
+    const resumeProgress = () => { const current = getProgress(); refreshProgress(current.position, current.duration); };
+    const removeProgress = addProgressListener(refreshProgress);
+    document.addEventListener('visibilitychange', resumeProgress);
 
     return () => {
       window.removeEventListener('ytm-auth-changed', onAuthChanged);
@@ -138,6 +144,7 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
       removeCast();
       removeNetwork();
       removeProgress();
+      document.removeEventListener('visibilitychange', resumeProgress);
     };
   }, []);
 

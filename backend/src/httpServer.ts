@@ -49,6 +49,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
           : null,
         isPlaying: ctx.castPlayer.isCurrentlyPlaying(),
         volume: volume.level,
+        muted: volume.muted,
         position,
         duration,
         connected: ctx.isConnected(),
@@ -62,6 +63,10 @@ const routes: Record<string, Record<string, RouteHandler>> = {
   },
 
   POST: {
+    '/api/queue/metadata': async (body, ctx) => {
+      void ctx.castPlayer.loadVisibleMetadata(body?.videoIds);
+      return { ok:true };
+    },
     '/api/play': async (_body, ctx) => {
       await ctx.libraryPlayer.resume();
       return { ok: true };
@@ -90,14 +95,19 @@ const routes: Record<string, Record<string, RouteHandler>> = {
 
     '/api/volume': async (body, ctx) => {
       const level = body?.volume ?? 100;
-      const currentVol = await ctx.libraryPlayer.getVolume();
-      await ctx.libraryPlayer.setVolume({ level, muted: currentVol.muted });
+      await ctx.libraryPlayer.setVolume({ level, muted:false });
       return { ok: true };
     },
 
     '/api/queue/jump': async (body, ctx) => {
       const videoId = body?.videoId;
       if (!videoId) return { ok: false, message: 'Missing videoId' };
+      if (body?.expectedIds) {
+        const ids = ctx.castPlayer.getQueueWithMetadata().tracks.map(t => t.videoId);
+        if (!Array.isArray(body.expectedIds) || JSON.stringify(body.expectedIds) !== JSON.stringify(ids) ||
+            ids[body.index] !== videoId)
+          return { ok:false, message:'Queue changed. Please try again.' };
+      }
       const result = await ctx.castPlayer.playVideoById(videoId);
       return { ok: result };
     },
@@ -111,6 +121,10 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     '/api/queue/next': async (body, ctx) => {
       if (!ctx.isConnected()) return { ok:false, message:'Cast session ended. Please try again.' };
       return ctx.castPlayer.queueNext(body);
+    },
+    '/api/queue/append': async (body, ctx) => {
+      if (!ctx.isConnected()) return { ok:false, message:'Cast session ended. Please try again.' };
+      return ctx.castPlayer.appendTracks(body?.tracks, body?.next === true);
     },
 
     '/api/stop': async (_body, ctx) => { await ctx.castPlayer.stop(); ctx.castPlayer.clearOnDisconnect(); return { ok: true }; },

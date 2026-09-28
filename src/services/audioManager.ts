@@ -23,22 +23,90 @@ let castPlaybackId: string | null = null;
 let pendingCastEnded = false;
 let castRevision = 0;
 let queueRevision = 0;
+let queueMirror: Promise<unknown> = Promise.resolve();
+let localRetryId: string | null = null;
+let retryInFlight = false;
+let failedLocalTracks = 0;
+let skippingLocal = false;
+async function skipFailedLocalTrack() {
+  if (skippingLocal || !currentTrack || stoppingAll || playbackSource !== 'local') return;
+  if (++failedLocalTracks > 5) { notifyPlaying(false); return; }
+  skippingLocal = true;
+  const generation = playbackGeneration;
+  try {
+  const result = await call<[string], TrackInfo & { stopped?:boolean; error?:string }>('skip_unplayable', currentTrack.videoId);
+  if (generation !== playbackGeneration || stoppingAll) return;
+  if (result.stopped || result.error || !result.url) { notifyPlaying(false); return; }
+  await loadAndPlay(result);
+  } finally { skippingLocal = false; }
+}
 let connectionRevision = 0;
 const usesCast = () => playbackSource === 'cast' || castConnected;
 let castConnected = false;
 let castNetwork: NetworkInfo = { uuid: null, name: null, trusted: false };
 let castSenderName: string | null = null;
+let senderNotified = false;
+let senderNameTimer: ReturnType<typeof setTimeout> | null = null;
+function notifySender(name: string | null, avatar?: string) {
+  if (!name) {
+    if (senderNotified) return;
+    senderNotified = true;
+    castSenderName = null;
+    if (!castConnected) {
+      castConnected = true;
+      castConnectionListeners.forEach(fn => fn(true, null));
+    }
+    // A connection/track can arrive just before the receiver supplies the
+    // sender object. Give that event a moment before showing the generic label.
+    senderNameTimer = setTimeout(() => {
+      senderNameTimer = null;
+      senderConnectedListeners.forEach(fn => fn(null, undefined));
+    }, 1200);
+    return;
+  }
+  if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
+  if (senderNotified && name === castSenderName) return;
+  senderNotified = true;
+  castSenderName = name;
+  senderConnectedListeners.forEach(fn => fn(name, avatar));
+  // senderConnected is the receiver's strongest signal that Cast has resumed.
+  // Do not depend on the separate connection-state broadcast arriving after a
+  // Stop/restart; either event should restore the plugin's Cast indicator.
+  if (!castConnected) {
+    castConnected = true;
+    castConnectionListeners.forEach(fn => fn(true, name));
+  } else {
+    castConnectionListeners.forEach(fn => fn(true, name));
+  }
+}
 let progressPosition = 0;
 let progressDuration = 0;
+let volumeValue = 100;
+let volumeMuted = false;
+let volumeRevision = 0;
+let lastCastReport = 0;
+let volumeListeners: Array<(value:number) => void> = [];
+export function getAudioVolume() { return volumeMuted ? 0 : volumeValue; }
+export function addVolumeListener(fn:(value:number)=>void) {
+  volumeListeners.push(fn);
+  return () => { volumeListeners = volumeListeners.filter(listener => listener !== fn); };
+}
+function applyVolume(value:number, muted = false) {
+  if (!Number.isFinite(value)) return;
+  volumeRevision++;
+  volumeValue = Math.max(0, Math.min(100, value)); volumeMuted = muted;
+  if (audioElement) { audioElement.volume = volumeValue / 100; audioElement.muted = muted; }
+  volumeListeners.forEach(fn => fn(getAudioVolume()));
+}
 
 let trackChangeListeners: Array<(track: TrackInfo | null) => void> = [];
 let playbackStartedListeners: Array<(track: TrackInfo) => void> = [];
-let senderConnectedListeners: Array<(name: string | null) => void> = [];
+let senderConnectedListeners: Array<(name: string | null, avatar?:string) => void> = [];
 export function addPlaybackStartedListener(fn: (track: TrackInfo) => void) {
   playbackStartedListeners.push(fn);
   return () => { playbackStartedListeners = playbackStartedListeners.filter(l => l !== fn); };
 }
-export function addSenderConnectedListener(fn: (name: string | null) => void) {
+export function addSenderConnectedListener(fn: (name: string | null, avatar?:string) => void) {
   senderConnectedListeners.push(fn);
   return () => { senderConnectedListeners = senderConnectedListeners.filter(l => l !== fn); };
 }
@@ -89,7 +157,7 @@ function notifyQueue(tracks: TrackInfo[], position: number) {
   queueListeners.forEach((fn) => fn(tracks, position));
   // Keep Decky's local queue in sync with the Cast queue so the Queue tab is
   // always the same queue shown by the phone during a Cast session.
-  void call('sync_cast_queue', tracks, position).catch(() => {});
+  if (usesCast()) queueMirror = queueMirror.then(() => call('sync_cast_queue', tracks, position)).catch(() => {});
 }
 
 function notifyProgress(position: number, duration: number) { progressPosition = Math.max(0, position || 0); progressDuration = Math.max(0, duration || 0); progressListeners.forEach((fn) => fn(progressPosition, progressDuration)); }
@@ -103,6 +171,10 @@ function notifyPlaying(value: boolean) {
   if (value && currentTrack) playbackStartedListeners.forEach(fn => fn(currentTrack!));
 }
 function notifyCastConnection(value: boolean) {
+  if (!value) {
+    senderNotified = false;
+    if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
+  }
   castConnected = value;
   castConnectionListeners.forEach((fn) => fn(value, castSenderName));
 }
@@ -113,20 +185,14 @@ function notifyNetwork(info: NetworkInfo) {
 
 async function castGet(path: string) {
   try {
-    const res = await fetch(`${CAST_BACKEND}${path}`);
-    return await res.json();
+    return await castRequest(path);
   } catch {
     return null;
   }
 }
 async function castPost(path: string, body?: unknown) {
   try {
-    const res = await fetch(`${CAST_BACKEND}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    return await res.json();
+    return await castRequest(path, body ?? {});
   } catch {
     return { ok: false };
   }
@@ -144,17 +210,45 @@ function sendCast(event: string, data: unknown = {}) {
   }
 }
 
+/** No retries for mutations: repeating a timed-out queue edit could apply it twice. */
+export async function castRequest(path: string, body?: unknown): Promise<any> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(`${CAST_BACKEND}${path}`, {
+      signal:controller.signal, ...(body === undefined ? {} : {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
+      }),
+    });
+    const value = await res.json();
+    if (!res.ok || value?.ok === false || value?.error)
+      throw new Error(value?.message || value?.error || 'Cast could not complete this action.');
+    return value;
+  } finally { clearTimeout(timer); }
+}
+
 function sendCastPlayback(event: string, data: Record<string, unknown> = {}) {
+  if (event === 'progress') lastCastReport = Date.now();
   if (castPlaybackId) sendCast(event, { ...data, playbackId:castPlaybackId });
 }
 
 function startCastProgress() {
   if (progressTimer) clearInterval(progressTimer);
+  let lastPosition = audioElement?.currentTime ?? 0;
+  let lastAdvance = Date.now();
   progressTimer = setInterval(() => {
     if (!audioElement || playbackSource !== 'cast' || !isPlaying) return;
     const duration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0;
     notifyProgress(audioElement.currentTime, duration);
     sendCastPlayback('progress', { currentTime: audioElement.currentTime, duration });
+    if (Math.abs(audioElement.currentTime - lastPosition) > .05) {
+      lastPosition = audioElement.currentTime;
+      lastAdvance = Date.now();
+    } else if (!audioElement.paused && !audioElement.ended && Date.now() - lastAdvance >= 20000) {
+      // Some stalled media requests never raise an error event.
+      lastAdvance = Date.now();
+      sendCastPlayback('playbackError', {message:'Audio stalled for 20 seconds'});
+    }
   }, 1000);
 }
 function stopCastProgress() {
@@ -166,6 +260,10 @@ function stopCastProgress() {
 
 async function handleCastTrack(data: any) {
   if (!audioElement || !data?.url) return;
+  // A valid receiver track is also proof that a sender is actively casting.
+  // Recover UI state and the one-time connection alert if the sender event was
+  // lost while the receiver was restarting.
+  notifySender(castSenderName);
   const generation = ++playbackGeneration;
   playbackSource = 'cast';
   castPlaybackId = data.playbackId ?? null;
@@ -189,8 +287,11 @@ async function handleCastTrack(data: any) {
 
   const autoplay = data.autoplay !== false;
   if (autoplay) {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      await audioElement.play();
+      await Promise.race([audioElement.play(), new Promise<never>((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('Cast audio did not start within 20 seconds')), 20000);
+      })]);
       if (generation !== playbackGeneration) return;
       notifyPlaying(true);
       startCastProgress();
@@ -200,7 +301,7 @@ async function handleCastTrack(data: any) {
       console.error('[YTM] Cast playback failed:', e);
       sendCastPlayback('playbackError', { message: String(e) });
       notifyPlaying(false);
-    }
+    } finally { clearTimeout(deadline); }
   } else {
     notifyPlaying(false);
   }
@@ -212,10 +313,14 @@ function handleCastMessage(msg: any) {
   if (msg.event === 'connection') connectionRevision++;
   if (stoppingAll && ['track', 'state', 'queue'].includes(msg.event)) return;
   switch (msg.event) {
+    case 'volume':
+      if (usesCast()) applyVolume(msg.data?.value, !!msg.data?.muted);
+      break;
     case 'track':
       void handleCastTrack(msg.data);
       break;
     case 'state':
+      if (playbackSource !== 'cast') break;
       if (msg.data?.isPlaying && audioElement?.src && !isPlaying) {
         const generation = playbackGeneration;
         void audioElement.play().then(() => {
@@ -232,6 +337,7 @@ function handleCastMessage(msg: any) {
       }
       break;
     case 'stop':
+      if (playbackSource !== 'cast') break;
       playbackGeneration++;
       castPlaybackId = null;
       pendingCastEnded = false;
@@ -243,6 +349,7 @@ function handleCastMessage(msg: any) {
       notifyProgress(0, 0);
       break;
     case 'seek':
+      if (playbackSource !== 'cast') break;
       if (audioElement && Number.isFinite(msg.data?.position)) {
         audioElement.currentTime = msg.data.position;
       }
@@ -251,11 +358,17 @@ function handleCastMessage(msg: any) {
       notifyQueue(msg.data?.tracks ?? [], msg.data?.position ?? -1);
       break;
     case 'connection':
-      castSenderName = msg.data?.senderName ?? null;
-      notifyCastConnection(!!msg.data?.phoneConnected);
+      if (msg.data?.phoneConnected) {
+        const name = msg.data?.senderName ?? null;
+        if (!castConnected || (name && name !== castSenderName)) notifySender(name);
+        else notifyCastConnection(true);
+      } else {
+        castSenderName = msg.data?.senderName ?? null;
+        notifyCastConnection(false);
+      }
       break;
     case 'senderConnected':
-      senderConnectedListeners.forEach(fn => fn(msg.data?.senderName ?? null));
+      notifySender(msg.data?.senderName ?? null, msg.data?.avatar);
       break;
     case 'network':
       notifyNetwork({
@@ -280,12 +393,15 @@ function connectCast() {
     const revision = castRevision;
     const queueSnapshot = queueRevision;
     const connectionSnapshot = connectionRevision;
+    const volumeSnapshot = volumeRevision;
     void castGet('/api/state').then((state) => {
       if (!state || ws !== socket || revision !== castRevision || stoppingAll) return;
       if (connectionSnapshot === connectionRevision) {
-        castSenderName = state.senderName ?? null;
-        notifyCastConnection(!!state.connected);
+        const name = state.senderName ?? null;
+        if (state.connected && (!castConnected || (name && name !== castSenderName))) notifySender(name);
+        else notifyCastConnection(!!state.connected);
       }
+      if (volumeSnapshot === volumeRevision && (state.connected || state.track)) applyVolume(state.volume, !!state.muted);
       if (state.track?.url) {
         if (playbackSource !== 'cast' || state.track.playbackId !== castPlaybackId || !audioElement?.src) {
           void handleCastTrack({ ...state.track, position:state.position, autoplay:state.isPlaying });
@@ -344,7 +460,10 @@ function onAudioError() {
 function onAudioTimeUpdate() {
   if (!audioElement) return;
   const duration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0;
+  if (playbackSource === 'cast' && isPlaying && !audioElement.paused && Date.now() - lastCastReport >= 4000)
+    sendCastPlayback('progress', {currentTime:audioElement.currentTime, duration});
   notifyProgress(audioElement.currentTime, duration);
+  if (audioElement.currentTime > 2) failedLocalTracks = 0;
 }
 
 function onAudioPause() {
@@ -367,32 +486,37 @@ async function handleLocalTrackEnded() {
   } catch { notifyPlaying(false); }
 }
 async function handleLocalError() {
+  if (retryInFlight || !currentTrack) return;
+  if (localRetryId === currentTrack.videoId) { await skipFailedLocalTrack().catch(() => notifyPlaying(false)); return; }
+  retryInFlight = true;
+  localRetryId = currentTrack.videoId;
   const generation = playbackGeneration;
   try {
     const result = await call<[], TrackInfo & { error?: string }>('get_current_track');
     if (generation !== playbackGeneration) return;
-    if (result.error || !result.url) {
-      const next = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('next_track');
-      if (generation !== playbackGeneration) return;
-      if (next.stopped || next.error) { notifyPlaying(false); return; }
-      await loadAndPlay(next);
-      return;
-    }
-    await loadAndPlay(result);
+    if (result.error || !result.url) { await skipFailedLocalTrack(); return; }
+    await loadAndPlay(result, true);
   } catch { notifyPlaying(false); }
+  finally { retryInFlight = false; }
 }
 
-async function loadAndPlay(track: TrackInfo) {
+async function loadAndPlay(track: TrackInfo, retry = false) {
   if (stoppingAll || !audioElement || !track.url) return;
+  if (!retry) localRetryId = null;
   const generation = ++playbackGeneration;
   playbackSource = 'local';
   castPlaybackId = null;
   pendingCastEnded = false;
   stopCastProgress();
+  const resumePosition = retry ? audioElement.currentTime : 0;
   audioElement.src = track.url;
+  if (resumePosition > 0) audioElement.currentTime = resumePosition;
   notifyTrack(track);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    await audioElement.play();
+    await Promise.race([audioElement.play(), new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('Audio did not start within 20 seconds')), 20000);
+    })]);
     if (generation !== playbackGeneration) return;
     notifyPlaying(true);
     void call('resume');
@@ -400,7 +524,11 @@ async function loadAndPlay(track: TrackInfo) {
     if (generation !== playbackGeneration) return;
     console.error('[YTM] play failed:', e);
     notifyPlaying(false);
-  }
+    // Retry once, then skip; defer until an ongoing retry releases its guard.
+    if ((e as { name?:string })?.name !== 'NotAllowedError') setTimeout(() => {
+      if (generation === playbackGeneration && !stoppingAll) void handleLocalError();
+    }, 0);
+  } finally { clearTimeout(deadline); }
 }
 
 export function initAudio() {
@@ -424,6 +552,7 @@ export function initAudio() {
 }
 
 export function destroyAudio() {
+  volumeListeners = [];
   playbackGeneration++;
   stopCastProgress();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -437,6 +566,8 @@ export function destroyAudio() {
     audioElement.remove(); audioElement = null;
   }
   currentTrack = null; isPlaying = false; castConnected = false; castSenderName = null; progressPosition = 0; progressDuration = 0;
+  senderNotified = false;
+  if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
   playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
   castQueue = { tracks: [], position: -1 };
   trackChangeListeners = []; playStateListeners = [];
@@ -447,8 +578,12 @@ export function destroyAudio() {
 export async function playTrack(track: TrackInfo) {
   // Taking control from the Deck explicitly ends the phone Cast session first.
   if (usesCast()) {
+    const snapshot = await call('get_queue');
     await disconnectCast();
     await new Promise((resolve) => setTimeout(resolve, 150));
+    await queueMirror;
+    const restored = await call<[unknown], {success?:boolean;error?:string}>('restore_local_queue', snapshot);
+    if (!restored.success) throw new Error(restored.error || 'Could not restore your playlist.');
   }
   await loadAndPlay(track);
 }
@@ -457,6 +592,7 @@ export function pausePlayback() {
     void castPost('/api/pause');
     return;
   }
+  playbackGeneration++;
   notifyPlaying(false);
   void call('pause');
   audioElement?.pause();
@@ -495,7 +631,7 @@ export async function playPrevious() {
   await loadAndPlay(result);
 }
 export function setAudioVolume(value: number) {
-  if (audioElement) audioElement.volume = Math.max(0, Math.min(1, value / 100));
+  applyVolume(value);
   if (!usesCast()) void call('set_volume', value);
   else void castPost('/api/volume', { volume: value });
 }
@@ -534,8 +670,11 @@ export function stopAllPlayback(): Promise<void> {
 }
 
 export async function disconnectCast() {
+  senderNotified = false;
   const result = await castPost('/api/cast/disconnect');
   if (!result?.ok) throw new Error('Could not unlink and restart Cast. Please try again.');
+  castSenderName = null;
+  notifyCastConnection(false);
 }
 
 export function seekPlayback(position: number) {

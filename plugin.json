@@ -11,7 +11,7 @@
       "youtube",
       "cast"
     ],
-    "description": "Play YouTube Music directly on Steam Deck and receive YouTube/YouTube Music Cast sessions.",
+    "description": "Play YouTube Music and receive Cast sessions on SteamOS devices with Decky Loader, including Steam Deck and Steam Machine.",
     "image": ""
   }
 }

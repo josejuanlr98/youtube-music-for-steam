@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 
 $PluginName = "YouTube Music"   # Must match plugin.json "name" exactly
-$ZipSlug   = "youtube-music-unified"    # Used for the output ZIP filename
+$ZipSlug   = "youtube-music-for-steam"  # Used for the output ZIP filename
 $NodeVersion = "v20.18.3"
 $NodeUrl = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-linux-x64.tar.xz"
 $YtdlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"

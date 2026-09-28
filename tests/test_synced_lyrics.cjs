@@ -14,7 +14,7 @@ const follow=api.followSyncedLyrics(el,lines,()=>position,fn=>{listener=fn;retur
 function progress(value){position=value;listener(value)}
 progress(2);assert.equal(active.at(-1),0);
 const count=moves.length;progress(3);assert.equal(moves.length,count,'same line must not repeatedly restart smooth scrolling');
-follow.pause();assert.equal(delay,5000);progress(6);assert.equal(active.at(-1),1);assert.equal(moves.length,count);
+follow.pause();assert.equal(delay,3000);progress(6);assert.equal(active.at(-1),1);assert.equal(moves.length,count);
 timer();assert(moves.length>count,'manual reading resumes at current audio time');
 progress(2);assert.equal(active.at(-1),0,'seek backwards follows the earlier line');
 progress(10);assert.equal(active.at(-1),-1,'outro has no falsely active lyric');

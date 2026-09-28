@@ -1,7 +1,7 @@
 {
   "name": "decky-youtube-music-cast",
-  "version": "0.6.7",
-  "description": "YouTube Music player and YouTube Cast receiver for Steam Deck.",
+  "version": "0.6.8",
+  "description": "YouTube Music player and Cast receiver for SteamOS handhelds and PCs.",
   "type": "module",
   "scripts": {
     "build": "rollup -c",

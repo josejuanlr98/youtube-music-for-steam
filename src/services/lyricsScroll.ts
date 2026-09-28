@@ -29,7 +29,7 @@ export function startLyricsScroll(element: HTMLElement) {
     }
   }, 50);
   return {
-    pause() { restartAt = 0; pausedUntil = Date.now() + 5000; position = element.scrollTop; },
+    pause() { restartAt = 0; pausedUntil = Date.now() + 3000; position = element.scrollTop; },
     dispose() { clearInterval(timer); },
   };
 }

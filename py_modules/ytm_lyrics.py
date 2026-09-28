@@ -102,7 +102,7 @@ class LyricsResolver:
             params['album_name'] = metadata['album']
         self.last_request = time.monotonic()
         response = self.http_get('https://lrclib.net/api/get', params=params, timeout=8,
-                                 headers={'User-Agent': 'YouTubeMusicUnified/0.6.6 (https://github.com/josejuanlr98/youtube-music-unified)'})
+                                 headers={'User-Agent': 'YouTubeMusicForSteam/0.6.8 (https://github.com/josejuanlr98/youtube-music-for-steam)'})
         try:
             if response.status_code == 429:
                 retry = response.headers.get('Retry-After', '60')

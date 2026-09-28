@@ -14,7 +14,7 @@ const modules = {
  '../services/audioManager':{getIsCastConnected:()=>false, getCastSenderName:()=>null, addCastConnectionListener:()=>()=>{}, getCurrentTrack:()=>({videoId:'test',title:'Test'}),getProgress:()=>({position:45}),addProgressListener(){},addTrackChangeListener(){},playNext:async()=>{next++},playPrevious:async()=>{previous++},togglePlayback:()=>{toggled++}},
  '../services/lyrics':{},'../services/focus':{},
  '../services/artworkPalette':{useArtworkPalette:()=> ['180,202,220','72,101,137','43,66,96']},'./ArtworkBackdrop':{ArtworkBackdrop:'backdrop'},
- './ThemeScope':{ThemeScope:'theme'},'../services/lyricsSource':{lyricsSource:s=>s}
+ './ThemeScope':{ThemeScope:'theme'},'./OverflowText':{OverflowText:'overflow-text'},'../services/lyricsSource':{lyricsSource:s=>s}
 };
 const result = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/components/LyricsPage.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,{

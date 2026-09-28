@@ -24,6 +24,7 @@ async function setup() {
     './JsonDataStore.js': { JsonDataStore: class {
       async get(key) { return key === 'ssdp.uuid' ? 'persistent-id' : ['Home']; }
       async set() {}
+      async remove() {}
       async flush() {}
     } },
     './wsManager.js': { WsManager: class {
@@ -42,7 +43,7 @@ async function setup() {
     require: name => name in modules ? modules[name] : require(name),
     exports: {}, __dirname: path.dirname(filename),
     process: { env: {}, on() {}, exit(code) { throw Error(`Unexpected exit ${code}`); } },
-    console: { log() {}, error() {} },
+    console: { log() {}, error() {}, warn() {} },
     setInterval(fn, ms) { state.timers.push({ fn, ms }); }, clearInterval() {}, setTimeout, clearTimeout,
   }, { filename });
   for (let i = 0; i < 40; i++) await Promise.resolve();
@@ -68,7 +69,7 @@ async function setup() {
 
   s = await setup();
   s.failStart = true;
-  assert.equal(await s.ctx.disconnectCast(), false);
+  assert.equal(await s.ctx.disconnectCast(), true);
   s.timers.find(t => t.ms === 10000).fn();
   for (let i = 0; i < 40; i++) await Promise.resolve();
   assert.equal(s.starts, 3);
@@ -84,7 +85,7 @@ async function setup() {
   finish();
   assert.equal(await first, true);
   assert.equal(await second, true);
-  assert.equal(s.stops, 2);
-  assert.equal(s.starts, 3);
-  console.log('PASS concurrent unlink operations are serialized');
+  assert.equal(s.stops, 1);
+  assert.equal(s.starts, 2);
+  console.log('PASS concurrent unlink requests share one stop and receiver restart');
 })().catch(error => { console.error(error); process.exitCode = 1; });

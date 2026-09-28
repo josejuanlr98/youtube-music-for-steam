@@ -6,6 +6,7 @@ export const defaultAccent = '180, 202, 220';
 export type ArtworkPalette = [string, string, string];
 export const defaultPalette: ArtworkPalette = [defaultAccent, '72, 101, 137', '43, 66, 96'];
 const cache = new Map<string, ArtworkPalette>();
+const pendingPalettes = new Map<string, Promise<ArtworkPalette>>();
 const localArtwork = new Map<string, Promise<string | undefined>>();
 export function loadLocalArtwork(url: string): Promise<string | undefined> {
   const cached = localArtwork.get(url);
@@ -132,22 +133,37 @@ export async function artworkPalette(original: string, doc: Document) {
   }
 }
 
+export function preloadArtworkPalette(original: string, doc: Document): Promise<ArtworkPalette> {
+  const cached = cache.get(original);
+  if (cached) return Promise.resolve(cached);
+  let pending = pendingPalettes.get(original);
+  if (!pending) {
+    pending = artworkPalette(original, doc).then(color => {
+      if (color !== defaultPalette) {
+        if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+        cache.set(original, color);
+      }
+      return color;
+    }).finally(() => pendingPalettes.delete(original));
+    pendingPalettes.set(original, pending);
+  }
+  return pending;
+}
+
 export function useArtworkPalette(url?: string, view?: { current: HTMLElement | null }) {
-  const [accent, setAccent] = useState(defaultPalette);
+  const [value, setValue] = useState({ url, palette:url ? cache.get(url) || defaultPalette : defaultPalette });
   useEffect(() => {
-    setAccent(url ? cache.get(url) || defaultPalette : defaultPalette);
+    // Keep the last resolved palette while the new cover is sampled: no neutral flash.
+    setValue(previous => ({ url, palette:url ? cache.get(url) || previous.palette : defaultPalette }));
     if (!url || cache.has(url)) return;
     let alive = true;
-    void artworkPalette(url, view?.current?.ownerDocument || document).then(color => {
-      if (alive) {
-        if (cache.size >= 12) cache.delete(cache.keys().next().value!);
-        if (color !== defaultPalette) cache.set(url, color);
-        setAccent(color);
-      }
+    const pending = preloadArtworkPalette(url, view?.current?.ownerDocument || document);
+    void pending.then(color => {
+      if (alive) setValue(previous => ({ url, palette:color === defaultPalette ? previous.palette : color }));
     });
     return () => { alive = false; };
   }, [url]);
-  return accent;
+  return value.url === url ? value.palette : url ? cache.get(url) || value.palette : defaultPalette;
 }
 
 export async function artworkAccent(original: string, doc: Document) {

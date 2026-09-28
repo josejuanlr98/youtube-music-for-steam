@@ -37,7 +37,7 @@ export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
     pause() {
       paused = true;
       clearTimeout(resumeTimer);
-      resumeTimer = setTimeout(() => { paused = false; update(readPosition(), true); }, 5000);
+      resumeTimer = setTimeout(() => { paused = false; update(readPosition(), true); }, 3000);
     },
     dispose() { disposed = true; clearTimeout(resumeTimer); unsubscribe(); },
   };

@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## 0.6.8
+
+- Lanzamiento de **YouTube Music for Steam**, con soporte objetivo para Steam Deck y Steam Machine en SteamOS cuando Decky Loader está disponible.
+- Inicio más rápido de playlists: reproduce el primer lote mientras el resto se carga en segundo plano.
+- Importación más sencilla de sesiones desde Firefox, reordenamiento de biblioteca y cola, y orden alfabético personalizado.
+- Letras a pantalla completa con seguimiento sincronizado, protección temporal contra suspensión y fondo animado de carátula.
+- Mejoras visuales en reproductor, búsqueda, biblioteca, cola, letras y notificaciones.
+- Recuperación de Cast, controles de volumen y likes, y limpieza de sesión al usar Stop.
+
 ## 0.6.3
 
 - Respect independent connection and track notification sound preferences when Steam displays queued toasts.

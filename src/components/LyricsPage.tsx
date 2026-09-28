@@ -13,6 +13,7 @@ import { suppressFullscreenNotifications } from '../services/notifications';
 import { useArtworkPalette } from '../services/artworkPalette';
 import { ArtworkBackdrop } from './ArtworkBackdrop';
 import { ThemeScope } from './ThemeScope';
+import { OverflowText, OverflowTextGroup } from './OverflowText';
 import { lyricsSource } from '../services/lyricsSource';
 
 export const LYRICS_ROUTE = '/youtube-music-lyrics';
@@ -105,6 +106,13 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   const centered = fullScreen && (!track || (!loading && !result.lyrics && !result.error));
   const source = lyricsSource(result.source);
   const pauseMotion = () => autoScroll.current?.pause();
+  useEffect(() => {
+    if (!fullScreen || !rootRef.current || typeof rootRef.current.animate !== 'function') return;
+    if (rootRef.current.ownerDocument.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animations = Array.from(rootRef.current.querySelectorAll<HTMLElement>('.ytm-cover-column, .ytm-reader'))
+      .map(element => element.animate([{ opacity:.15, transform:'translateY(4px)' }, { opacity:1, transform:'translateY(0)' }], { duration:300, easing:'ease-out' }));
+    return () => animations.forEach(animation => animation.cancel());
+  }, [fullScreen]);
   const palette = useArtworkPalette(track?.albumArt, rootRef);
   const accent = palette[0];
   const transportBusy = useRef(false);
@@ -151,7 +159,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     : { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: '10px 12px', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'smooth' as const, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const };
 
   const lyricsContent = loading
-    ? <span className="ytm-muted">Loading lyrics…</span>
+    ? <div className="ytm-muted" style={fullScreen ? { height:'100%', display:'grid', placeItems:'center', fontSize:12, fontWeight:400, opacity:.55 } : undefined}>Loading lyrics…</div>
     : result.error
       ? <span style={{ color: '#ffc3cb' }}>{result.error}</span>
       : result.timedLines?.length
@@ -181,11 +189,11 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       } : undefined}
       onButtonDown={event => {
         const button = event.detail.button;
-        if (button === GamepadButton.BUMPER_LEFT || button === GamepadButton.BUMPER_RIGHT) {
+        if (fullScreen && (button === GamepadButton.BUMPER_LEFT || button === GamepadButton.BUMPER_RIGHT)) {
           event.preventDefault(); event.stopPropagation();
           if (fullScreen) {
             if (!event.detail.is_repeat) void changeTrack(button === GamepadButton.BUMPER_LEFT);
-          } else scroll(button === GamepadButton.BUMPER_LEFT ? -1 : 1, true);
+          }
         }
       }}>
       <ThemeScope />
@@ -198,15 +206,17 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       </div>}
       <div className="ytm-lyrics-layout" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'row', gap: fullScreen ? 'clamp(18px, 4vw, 54px)' : 10, flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', alignItems: fullScreen ? 'center' : 'stretch', justifyContent:fullScreen ? 'center' : undefined, maxWidth:fullScreen ? 860 : undefined, width:'100%', margin:fullScreen ? '0 auto' : undefined }}>
         <div className="ytm-cover-column" style={{ width: fullScreen ? 'min(26vw, 260px, max(80px, calc(100vh - 360px)))' : 78, minWidth: fullScreen ? 80 : 78, maxWidth: fullScreen ? (centered ? '80%' : '30%') : 78, maxHeight:fullScreen ? '100%' : undefined, flex: '0 0 auto', overflowY: fullScreen ? 'auto' : 'hidden', textAlign: fullScreen ? 'center' : 'left', paddingBlock:fullScreen ? 8 : 0, boxSizing:'border-box' }}>
-          {fullScreen && track && <SiYoutubemusic className="ytm-cover-logo" size={44} style={{ display:'block', width:44, height:44, minHeight:44, overflow:'visible', margin:'0 auto 20px', color:`rgb(${accent})` }} aria-label="YouTube Music" />}
+          {fullScreen && track && <SiYoutubemusic className="ytm-cover-logo" size={44} style={{ display:'block', width:'clamp(44px, 3.4vw, 64px)', height:'clamp(44px, 3.4vw, 64px)', minHeight:44, overflow:'visible', margin:'0 auto 20px', color:`rgb(${accent})` }} aria-label="YouTube Music" />}
           {fullScreen && cast.connected && <div className="ytm-muted" style={{ textAlign:'center', fontSize:10, lineHeight:1.4, marginBottom:12, overflowWrap:'anywhere' }}>
             <MdCastConnected size={12} style={{ verticalAlign:'middle', marginRight:6 }} />{cast.sender || 'Connected device'}
           </div>}
           {track?.albumArt ? <img src={artwork} onError={event => { if (event.currentTarget.src !== track.albumArt) event.currentTarget.src = track.albumArt; }} alt="Album art" style={{ width: fullScreen ? '100%' : 78, height: fullScreen ? 'auto' : 78, aspectRatio: '1', display: 'block', maxWidth: '100%', objectFit: 'cover', borderRadius: fullScreen ? 8 : 4, boxShadow:'none' }} />
             : <div className="ytm-card" style={{ width: '100%', aspectRatio: '1', display: 'grid', placeItems: 'center' }}><SiYoutubemusic size={fullScreen ? 84 : 26} /></div>}
-          <h2 style={{ fontSize: fullScreen ? 16 : 12, lineHeight: 1.3, margin: fullScreen ? '14px 0 4px' : '8px 0 4px', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{track?.title ?? 'Nothing playing'}</h2>
-          <div className="ytm-muted" style={{ fontSize: fullScreen ? 13 : 10, lineHeight: 1.35, overflowWrap: 'anywhere', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{track?.artist || 'Play a song to see its lyrics.'}</div>
+          <OverflowTextGroup textKey={`${fullScreen}|${track?.title}|${track?.artist}`}>
+          <h2 style={{ fontSize: fullScreen ? 16 : 12, lineHeight: 1.3, margin: fullScreen ? '14px 0 4px' : '8px 0 4px', overflowWrap: 'anywhere', overflow: 'hidden' }}>{fullScreen ? <OverflowText text={track?.title ?? 'Nothing playing'} /> : track?.title ?? 'Nothing playing'}</h2>
+          <div className="ytm-muted" style={{ fontSize: fullScreen ? 15 : 11, lineHeight: 1.35, overflowWrap: 'anywhere', overflow:'hidden' }}>{fullScreen ? <OverflowText text={track?.artist || 'Play a song to see its lyrics.'} /> : track?.artist || 'Play a song to see its lyrics.'}</div>
 
+          </OverflowTextGroup>
           {source && <div className="ytm-lyrics-source" style={{ marginTop:12, fontSize:fullScreen ? 10 : 9, lineHeight:1.4, color:`rgb(${accent})`, opacity:.82, overflowWrap:'anywhere' }}>
             Source: {source}
           </div>}

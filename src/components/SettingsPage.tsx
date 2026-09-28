@@ -1,22 +1,20 @@
-import { ButtonItem, TextField, DialogButton, Focusable, SidebarNavigation, ToggleField } from '@decky/ui';
+import { ButtonItem, TextField, DialogButton, Focusable, SidebarNavigation } from '@decky/ui';
 import { call } from '@decky/api';
 import { useEffect, useState } from 'react';
 import { apiGetNetwork, apiTrustNetwork, apiUntrustNetwork, disconnectCast } from '../services/audioManager';
 import { loadNotificationSettings, saveNotificationSettings, type NotificationSettings } from '../services/notifications';
-import { getVisualDiagnostics } from '../services/visualDiagnostics';
-
-const VisualDiagnosticsContent = () => {
-  const [events, setEvents] = useState(getVisualDiagnostics);
-  return <div style={{ padding:20, color:'#f4f6fa' }}>
-    <h3>Visual diagnostics · beta.9</h3>
-    <p style={{ fontSize:12 }}>Open fullscreen for a few seconds, then return here. These results stay on your Deck.</p>
-    <ButtonItem onClick={() => setEvents(getVisualDiagnostics())}>Refresh results</ButtonItem>
-    <div style={{ fontSize:11, lineHeight:1.6, overflowWrap:'anywhere' }}>
-      {events.length ? events.map((event, i) => <div key={i}>{event}</div>) : 'No visual activity recorded yet.'}
-    </div>
-  </div>;
-};
-
+import { ThemeScope } from './ThemeScope';
+import { SiFirefoxbrowser } from 'react-icons/si';
+const SettingsToggle = ({label, description, checked, disabled, onChange}: {
+  label:string; description?:string; checked:boolean; disabled?:boolean; onChange:(value:boolean) => void;
+}) => <DialogButton className="ytm-settings-toggle" aria-label={`${label}: ${checked ? 'On' : 'Off'}`} aria-pressed={checked}
+  disabled={disabled} onClick={() => onChange(!checked)}
+  style={{width:'100%',minWidth:0,height:'auto',padding:'14px 16px',display:'flex',alignItems:'center',gap:20,textAlign:'left',marginBottom:8}}>
+  <span style={{flex:1,minWidth:0}}><span style={{display:'block',fontSize:14,fontWeight:600}}>{label}</span>
+    {description && <span style={{display:'block',fontSize:12,lineHeight:1.5,opacity:.72,marginTop:4}}>{description}</span>}
+  </span>
+  <span aria-hidden="true" className="ytm-switch" data-checked={checked}><span /></span>
+</DialogButton>;
 const NotificationsContent = () => {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,14 +28,14 @@ const NotificationsContent = () => {
     catch { setError('Could not save preferences. Please try again.'); }
     finally { setSaving(false); }
   };
-  return <div className="ytm-ui ytm-card" style={{ padding:20 }}>
+  return <div className="ytm-ui ytm-card ytm-settings" style={{ padding:20 }}><ThemeScope />
     <div className="ytm-eyebrow" style={{ marginBottom:12 }}>Notifications</div>
     <div className="ytm-muted" style={{ fontSize:12, marginBottom:12 }}>Steam notifications while you listen or play. Sound is off by default.</div>
     {settings ? <>
-      <ToggleField label="Device connected" description="Show the name of the device connecting to Cast." checked={settings.connections} disabled={saving} onChange={value => void update('connections', value)} />
-      <ToggleField label="Connection sound" checked={settings.connectionSound} disabled={saving || !settings.connections} onChange={value => void update('connectionSound', value)} />
-      <ToggleField label="Now playing" description="Show album cover, song title and artist when a song starts." checked={settings.tracks} disabled={saving} onChange={value => void update('tracks', value)} />
-      <ToggleField label="Song change sound" checked={settings.trackSound} disabled={saving || !settings.tracks} onChange={value => void update('trackSound', value)} />
+      <SettingsToggle label="Device connected" description="Show the name of the device connecting to Cast." checked={settings.connections} disabled={saving} onChange={value => void update('connections', value)} />
+      <SettingsToggle label="Connection sound" checked={settings.connectionSound} disabled={saving || !settings.connections} onChange={value => void update('connectionSound', value)} />
+      <SettingsToggle label="Now playing" description="Show album cover, song title and artist when a song starts." checked={settings.tracks} disabled={saving} onChange={value => void update('tracks', value)} />
+      <SettingsToggle label="Song change sound" checked={settings.trackSound} disabled={saving || !settings.tracks} onChange={value => void update('trackSound', value)} />
     </> : <ButtonItem onClick={load}>Reload preferences</ButtonItem>}
     {error && <div role="alert" className="ytm-error">{error}</div>}
   </div>;
@@ -52,6 +50,18 @@ const AuthContent = () => {
   const [filePath, setFilePath] = useState('/home/deck/yt-music-headers.txt');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [imported, setImported] = useState(false);
+  const [showFileImport, setShowFileImport] = useState(false);
+  const importFirefox = async () => {
+    if (saving) return;
+    setSaving(true); setError(''); setImported(false);
+    try {
+      const result = await call<[], {success?:boolean; error?:string}>('import_firefox_session');
+      if (!result.success) setError(result.error || 'Could not import Firefox.');
+      else { setImported(true); await refresh(); }
+    } catch { setError('Could not import Firefox. Please retry.'); }
+    finally { setSaving(false); }
+  };
 
   const refresh = async () => {
     try {
@@ -101,8 +111,20 @@ const AuthContent = () => {
   }
 
   return (
-    <div className="ytm-ui ytm-card" style={{ padding:20 }}>
+    <div className="ytm-ui ytm-card ytm-settings" style={{ padding:20 }}><ThemeScope />
       <div className="ytm-eyebrow" style={{ marginBottom:16 }}>Your account</div>
+      <div style={{padding:16,marginBottom:16,borderRadius:8,background:'#29323d'}}>
+        <div style={{fontSize:14,fontWeight:600,marginBottom:6}}>Connect with Firefox</div>
+        <div className="ytm-muted" style={{fontSize:12,lineHeight:1.6,marginBottom:12}}>
+          In Desktop Mode on this Deck, sign in to music.youtube.com in a normal Firefox window, then close Firefox.
+          Return here to import your primary account. Your saved session is replaced only after validation.
+        </div>
+        <DialogButton className="ytm-button" disabled={saving} onClick={() => void importFirefox()}
+          style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,minWidth:0,width:'100%'}}>
+          <SiFirefoxbrowser size={22} style={{color:'#ff9752'}} />{saving ? 'Connecting…' : 'Import from Firefox'}
+        </DialogButton>
+        {imported && <div role="status" style={{fontSize:12,color:'#b9dbc3',marginTop:10}}>Connected. Your session is saved on this Deck.</div>}
+      </div>
       {error && <div style={{ padding: '8px 0', color: '#ff6b6b', fontSize: '12px' }}>{error}</div>}
       {authState.authenticated ? (
         <Focusable flow-children="horizontal" style={{
@@ -110,6 +132,7 @@ const AuthContent = () => {
         }}>
           <span style={{ color: '#4caf50', fontSize: '14px' }}>Authenticated ✓</span>
           <DialogButton
+            disabled={saving}
             style={{ width: 'auto', minWidth: '100px', padding: '8px 16px', fontSize: '13px' }}
             onClick={() => void handleSignOut()}
           >
@@ -121,7 +144,11 @@ const AuthContent = () => {
           <div role="status" style={{ fontSize:13, lineHeight:1.5, marginBottom:16 }}>
             Cast only is available without signing in. Add your account below to unlock your library, search, likes and lyrics.
           </div>
-          <div style={{
+          <DialogButton className="ytm-button" disabled={saving} onClick={() => setShowFileImport(value => !value)}
+            style={{width:'100%',minWidth:0,fontSize:12,marginBottom:12}}>
+            {showFileImport ? 'Hide file import' : 'Advanced: import a headers file'}
+          </DialogButton>
+          {showFileImport && <><div style={{
             fontSize: '13px', color: 'var(--gpSystemLighterGrey)', lineHeight: '1.6', marginBottom: '16px'
           }}>
             <div style={{ marginBottom: '8px' }}>1. On your PC, open <span style={{ color: 'white' }}>music.youtube.com</span></div>
@@ -139,7 +166,7 @@ const AuthContent = () => {
             <ButtonItem disabled={saving} onClick={() => void handleLoadFile()}>
               {saving ? 'Loading...' : 'Load & Connect'}
             </ButtonItem>
-          </div>
+          </div></>}
         </>
       )}
     </div>
@@ -214,7 +241,7 @@ const CastContent = () => {
   };
 
   return (
-    <div className="ytm-ui ytm-card" style={{ padding:20 }}>
+    <div className="ytm-ui ytm-card ytm-settings" style={{ padding:20 }}><ThemeScope />
       <div className="ytm-eyebrow" style={{ marginBottom:8 }}>Listen from your phone</div>
       <div style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '10px' }}>
         <div style={{ fontSize: '12px', color: 'var(--gpSystemLighterGrey)', marginBottom: '6px' }}>Cast device name</div>
@@ -237,6 +264,13 @@ const CastContent = () => {
       </ButtonItem>
       {network?.trusted && <div style={{ color: '#4caf50', fontSize: '12px', padding: '8px 0' }}>Cast receiver is enabled on this network ✓</div>}
       <ButtonItem onClick={() => void stopCast()}>Stop Cast / Unlink</ButtonItem>
+      <ButtonItem onClick={async () => {
+        setMessage('Restarting Cast receiver…');
+        try {
+          const result = await call<[], {success?:boolean; error?:string}>('hard_reset');
+          setMessage(result.success ? 'Cast receiver restarted.' : (result.error || 'Could not restart Cast receiver.'));
+        } catch { setMessage('Could not restart Cast receiver.'); }
+      }}>Restart Cast receiver</ButtonItem>
       {message && <div role="status" style={{ color: '#c5d5e8', fontSize: '12px', padding: '8px 0' }}>{message}</div>}
     </div>
   );
@@ -250,7 +284,6 @@ export const SettingsPage = () => (
       { title: 'Account', content: <AuthContent />, route: '/youtube-music-settings/auth', visible: true },
       { title: 'Cast Receiver', content: <CastContent />, route: '/youtube-music-settings/cast', visible: true },
       { title: 'Notifications', content: <NotificationsContent />, route: '/youtube-music-settings/notifications', visible: true },
-      { title: 'Visual diagnostics', content: <VisualDiagnosticsContent />, route: '/youtube-music-settings/visuals', visible: true },
     ]}
   />
 );

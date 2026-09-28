@@ -48,11 +48,12 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   await exportsObject.loadNotificationSettings();
   assert.equal(toasts.length, 0);
   listeners.sender('Desktop');
-  assert.equal(toasts[0].body, 'Desktop has connected');
+  assert.equal(toasts[0].title.props.children, 'Desktop');
+  assert.equal(toasts[0].body.props.children, 'Connected · YouTube Music');
   assert.equal(toasts[0].playSound, false);
   const track = { videoId:'one', title:'Song', artist:'Artist', albumArt:'https://example.test/art.jpg' };
   listeners.playing(track);
-  assert.equal(toasts[1].title, 'Song'); assert.equal(toasts[1].body, 'Artist');
+  assert.equal(toasts[1].title.props.children, 'Song'); assert.equal(toasts[1].body.props.children, 'Artist');
   assert.equal(toasts[1].logo.props.src, track.albumArt); assert.equal(toasts[1].playSound, false);
   flushSounds(); assert.equal(sounded.length, 0, 'silent defaults must suppress actual Steam sound playback');
   listeners.playing(track); listeners.playing(track);
@@ -98,7 +99,7 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   const stopAgain = exportsObject.initNotifications();
   await exportsObject.loadNotificationSettings();
   listeners.sender('Steamcord loaded first');
-  assert.equal(toasts.at(-1).body, 'Steamcord loaded first has connected');
+  assert.equal(toasts.at(-1).title.props.children, 'Steamcord loaded first');
   assert.equal(chats, 1, 'works regardless of plugin load order');
   const beforeFullscreen = toasts.length;
   const resumeNotifications = exportsObject.suppressFullscreenNotifications();

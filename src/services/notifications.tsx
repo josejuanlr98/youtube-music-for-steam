@@ -9,9 +9,20 @@ export interface NotificationSettings {
   connectionSound: boolean;
   trackSound: boolean;
 }
-const notificationLogo = () => <div style={{ width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center', alignSelf:'center', flexShrink:0 }}>
-  <SiYoutubemusic size={32} style={{ width:32, height:32, display:'block', flexShrink:0 }} />
-</div>;
+const safeAvatar = (value?:string) => {
+  try {
+    const url = new URL(value || '');
+    return url.protocol === 'https:' && (url.hostname === 'googleusercontent.com' || url.hostname.endsWith('.googleusercontent.com') || url.hostname === 'yt3.ggpht.com') ? url.href : undefined;
+  } catch { return undefined; }
+};
+const notificationArtSize = 'clamp(52px, 6vh, 68px)';
+const notificationLogo = (avatar?:string) => safeAvatar(avatar)
+  ? <img src={safeAvatar(avatar)} alt="" referrerPolicy="no-referrer" style={{width:notificationArtSize,height:notificationArtSize,minWidth:notificationArtSize,flex:'0 0 auto',aspectRatio:'1 / 1',display:'block',objectFit:'cover',borderRadius:'50%',margin:0}} onError={event => { event.currentTarget.style.display='none'; }} />
+  : <div style={{ width:notificationArtSize, height:notificationArtSize, minWidth:notificationArtSize, aspectRatio:'1 / 1', display:'flex', alignItems:'center', justifyContent:'center', alignSelf:'center', flexShrink:0, overflow:'visible', background:'transparent', margin:0 }}>
+      <SiYoutubemusic size={48} style={{ width:'78%', height:'78%', display:'block', flexShrink:0, color:'#ffffff' }} />
+    </div>;
+const toastTitle = (text:string) => <div style={{fontSize:'clamp(11px, .9vw, 13px)',fontWeight:650,lineHeight:1.35,color:'#f5f7fa',maxWidth:'min(62vw, 420px)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{text}</div>;
+const toastDetail = (text:string) => <div style={{fontSize:'clamp(10px, .82vw, 12px)',lineHeight:1.45,color:'#aebdcb',marginTop:3,maxWidth:'min(62vw, 420px)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{text}</div>;
 let settings: NotificationSettings = { connections:true, tracks:true, connectionSound:false, trackSound:false };
 let ready = false;
 let fullscreenReaders = 0;
@@ -107,16 +118,16 @@ export function initNotifications() {
     } catch (error) { console.warn('[YTM] Notification unavailable', error); }
   };
   const removers = [
-    addSenderConnectedListener(name => {
-      if (settings.connections) toast({ title:'YouTube Music', body:`${name || 'A device'} has connected`, logo:notificationLogo(), playSound:settings.connectionSound });
+    addSenderConnectedListener((name, avatar) => {
+      if (settings.connections) toast({ title:toastTitle(name || 'Device connected'), body:toastDetail('Connected · YouTube Music'), logo:notificationLogo(avatar), playSound:settings.connectionSound });
     }),
     addTrackChangeListener(track => { if (!track) lastTrack = ''; }),
     addPlaybackStartedListener(track => {
       if (!track.videoId || lastTrack === track.videoId) return;
       lastTrack = track.videoId;
       if (!settings.tracks) return;
-      toast({ title:track.title || 'Now playing', body:track.artist || 'YouTube Music',
-        logo:track.albumArt ? <img src={track.albumArt} alt="" style={{ width:48, height:48, objectFit:'cover', borderRadius:6 }} onError={event => { event.currentTarget.style.visibility = 'hidden'; }} /> : notificationLogo(),
+      toast({ title:toastTitle(track.title || 'Now playing'), body:toastDetail(track.artist || 'YouTube Music'),
+        logo:track.albumArt ? <img src={track.albumArt} alt="" style={{ width:notificationArtSize, height:notificationArtSize, minWidth:notificationArtSize, flex:'0 0 auto', alignSelf:'center', display:'block', objectFit:'cover', borderRadius:7, margin:0 }} onError={event => { event.currentTarget.style.visibility = 'hidden'; }} /> : notificationLogo(),
         playSound:settings.trackSound });
     }),
   ];

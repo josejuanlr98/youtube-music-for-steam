@@ -12,7 +12,7 @@ function load(name, modules, globals = {}) {
   vm.runInNewContext(source, { exports, require: name => {
     if (name in modules) return modules[name];
     throw Error(`Unexpected import: ${name}`);
-  }, console, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
+  }, console, AbortController, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
   return exports;
 }
 
@@ -24,7 +24,7 @@ async function audioTests() {
   const audio = { style: {}, src: 'old', pause() { this.paused = true; }, load() {}, removeAttribute() { this.src = ''; }, addEventListener() {}, removeEventListener() {} };
   const api = load('src/services/audioManager.ts', { '@decky/api': { call: async name => { calls.push(name); return { success:true }; } } }, {
     document: { getElementById: () => audio }, WebSocket: class { static OPEN = 1; },
-    fetch: async (url) => { requests.push(url); await pending; return { json: async () => ({ ok:!failCast }) }; },
+    fetch: async (url) => { requests.push(url); await pending; return { ok:true, json: async () => ({ ok:!failCast }) }; },
   });
   api.initAudio();
   const stop = api.stopAllPlayback();
@@ -106,6 +106,7 @@ function lyricsTests() {
     '../services/artworkPalette': { useArtworkPalette:() => ['180,202,220','72,101,137','43,66,96'] },
     './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
     './ThemeScope': { ThemeScope:'theme' },
+    './OverflowText': { OverflowText:'overflow-text' },
     '../services/lyricsSource': { lyricsSource:s=>s },
   });
   const root = elements.LyricsPanel({ onBack: () => { back++; } });
@@ -115,7 +116,7 @@ function lyricsTests() {
   const reader = nodes.find(node => node.props['aria-label'] === 'Song lyrics');
   reader.props.onGamepadDirection(event(10)); assert.equal(scroll.scrollTop, 64);
   reader.props.onGamepadDirection(event(9)); assert.equal(scroll.scrollTop, 0);
-  root.props.onButtonDown(event(6)); assert.equal(scroll.scrollTop, 375);
+  root.props.onButtonDown(event(6)); assert.equal(scroll.scrollTop, 0);
   root.props.onButtonDown(event(5)); assert.equal(scroll.scrollTop, 0);
   root.props.onCancelButton(event(2)); assert.equal(back, 1);
   assert.equal(nodes.some(node => node.type === 'button' && JSON.stringify(node.props.children).includes('Page down')), false);

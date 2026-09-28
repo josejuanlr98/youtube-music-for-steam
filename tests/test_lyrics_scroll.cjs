@@ -5,9 +5,9 @@ const el={scrollTop:0,scrollHeight:200,clientHeight:100,ownerDocument:{visibilit
 const motion=api.startLyricsScroll(el);
 function advance(ms){for(let i=0;i<ms;i+=50){now+=50;tick()}}
 advance(3000);assert(el.scrollTop>10);
-motion.pause();el.scrollTop=50;advance(4950);assert.equal(el.scrollTop,50);advance(100);assert(el.scrollTop>50);
+motion.pause();el.scrollTop=50;advance(2950);assert.equal(el.scrollTop,50);advance(100);assert(el.scrollTop>50);
 while(el.scrollTop<100) advance(50);
 advance(4950);assert.equal(el.scrollTop,100);advance(50);assert.equal(el.scrollTop,0);advance(3000);assert(el.scrollTop>0);
 el.ownerDocument.visibilityState='hidden';const before=el.scrollTop;advance(3000);assert.equal(el.scrollTop,before);
 motion.dispose();assert(disposed);
-console.log('PASS automatic reading loops, waits five seconds after manual input, pauses when hidden and cleans up');
+console.log('PASS automatic reading loops, waits three seconds after manual input, pauses when hidden and cleans up');

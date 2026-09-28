@@ -15,6 +15,8 @@ import { SearchPage } from './components/SearchPage';
 import { LyricsPanel, LYRICS_ROUTE } from './components/LyricsPage';
 import { initAudio, destroyAudio } from './services/audioManager';
 import { initNotifications, registerNotificationPanel } from './services/notifications';
+import { usePlayer } from './context/PlayerContext';
+import { useArtworkAccent } from './services/artworkPalette';
 
 const SETTINGS_ROUTE = '/youtube-music-settings';
 const SEARCH_ROUTE = '/youtube-music-search';
@@ -24,6 +26,9 @@ const TABS_CSS = `
   #ytm-tabs-container [class*="TabHeaderRowWrapper"] { flex-shrink:0 !important; min-height:32px !important; padding-left:0 !important; padding-right:0 !important; }
   #ytm-tabs-container [class*="TabContentsScroll"] { flex:1 !important; min-height:0 !important; overflow-y:auto !important; padding-left:0 !important; padding-right:0 !important; }
   #ytm-tabs-container [class*="Glyphs"] { transform:scale(.65) !important; transform-origin:center center !important; }
+  /* Steam owns the Back button around our title view; scope the soft corner
+     treatment to that title row so other Quick Access controls stay native. */
+  div:has(> .ytm-plugin-title) > button { border-radius:8px !important; }
 `;
 
 const installThemeStyles = () => {
@@ -42,7 +47,21 @@ const removeThemeStyles = () => document.getElementById(THEME_STYLE_ID)?.remove(
 // own panel. The ancestor Quick Access layout is left untouched.
 const TabsContainer = memo(() => {
   const panelRef = useRef<HTMLDivElement>(null);
+  const { track } = usePlayer();
+  const coverAccent = useArtworkAccent(track?.albumArt, panelRef);
   useEffect(() => panelRef.current ? registerNotificationPanel(panelRef.current) : undefined, []);
+  useEffect(() => {
+    const doc = panelRef.current?.ownerDocument;
+    if (!doc) return;
+    const root = doc.documentElement;
+    const previous = root.style.getPropertyValue('--ytm-cover-deep');
+    root.style.setProperty('--ytm-cover-deep', coverAccent);
+    return () => {
+      if (root.style.getPropertyValue('--ytm-cover-deep') !== coverAccent) return;
+      if (previous) root.style.setProperty('--ytm-cover-deep', previous);
+      else root.style.removeProperty('--ytm-cover-deep');
+    };
+  }, [coverAccent]);
   const [activeTab, setActiveTab] = useState('player');
   useEffect(() => {
     const returnToPlayer = () => setActiveTab('player');
@@ -66,6 +85,7 @@ const TabsContainer = memo(() => {
     maxHeight:'calc(100vh - 96px)',
     overflow:'hidden',
     boxSizing:'border-box',
+    background:'linear-gradient(180deg, rgba(var(--ytm-cover-deep, 42, 82, 118), .16) 0%, rgba(var(--ytm-cover-deep, 42, 82, 118), .08) 48%, transparent 100%)',
   }}>
     <Tabs activeTab={activeTab} onShowTab={(tab: string) => setActiveTab(tab)} tabs={tabItems} />
   </div>;
@@ -100,11 +120,11 @@ export default definePlugin(() => {
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
-        className={staticClasses.Title}
+        className={`${staticClasses.Title} ytm-plugin-title`}
       >
         <div>YouTube Music</div>
         <DialogButton
-          style={{ height: '28px', width: '40px', minWidth: 0, padding: '10px 12px' }}
+          style={{ height: '28px', width: '40px', minWidth: 0, padding: '10px 12px', borderRadius: '8px' }}
           onClick={onSettingsClick}
           onOKActionDescription="Settings"
         >

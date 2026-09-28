@@ -26,14 +26,67 @@ export class CastPlayer extends Player {
   private playbackId: string | null = null;
   private endedPlaybackId: string | null = null;
   private retryingPlaybackId: string | null = null;
+  private retriedPlaybackId: unknown = null;
+  private failedTracks = 0;
   private lastSenderSync = 0;
+  private lastProgressSync = 0;
+  private progressHeartbeat: ReturnType<typeof setInterval> | null = null;
+  private lastAudioReport = 0;
+  private stopHeartbeat() {
+    if (this.progressHeartbeat) clearInterval(this.progressHeartbeat);
+    this.progressHeartbeat = null;
+    this.lastAudioReport = 0;
+  }
+  private armHeartbeat() {
+    if (this.progressHeartbeat || !this.playing) return;
+    this.progressHeartbeat = setInterval(() => {
+      // Bridge short overlay throttling only. Never invent indefinite playback.
+      if (!this.playing || this.sessionCleared || Date.now() - this.lastAudioReport > 15000) {
+        if (this.playing && this.lastAudioReport) this.currentPosition = Math.min(this.currentDuration || Infinity, this.currentPosition + 15);
+        this.stopHeartbeat(); return;
+      }
+      void this.syncSender(this.playbackId).catch(err => console.warn('[YTCast] Heartbeat failed:', err));
+    }, 5000);
+    this.progressHeartbeat.unref?.();
+  }
   private playRequest = 0;
   private activePlayRequest = 0;
+  private extractionFailure: { id:string; generation:number } | null = null;
   private playChain: Promise<void> = Promise.resolve();
   private deckOrder: string[] | null = null;
 
   /** An incoming sender playlist takes priority over a Deck-side arrangement. */
   clearDeckOrder(): void { this.deckOrder = null; }
+
+  async appendTracks(tracks: Array<{videoId?: string; title?: string; artist?: string; albumArt?: string; duration?: number}>, next = false) {
+    const current = this.queue.current;
+    const ids = this.deckOrder ?? this.queue.videoIds;
+    if (this.sessionCleared || !current || !ids.includes(current.id))
+      return { ok:false, message:'Cast session ended. Please try again.' };
+    if (!Array.isArray(tracks) || !tracks.length || tracks.length > 10000 ||
+        tracks.some(t => !t || typeof t.videoId !== 'string' || !/^[\w-]{1,64}$/.test(t.videoId)))
+      return { ok:false, message:'Invalid playlist.' };
+    const order = [...ids], seen = new Set(ids);
+    let added = 0;
+    for (const track of tracks) {
+      const id = track.videoId!;
+      // The Cast receiver identifies entries by ID. Keep each ID unambiguous.
+      if (seen.has(id)) continue;
+      seen.add(id); order.push(id); added++;
+      this.metadataCache.set(id, { videoId:id, title:String(track.title || id), artist:String(track.artist || ''),
+        albumArt:String(track.albumArt || ''), duration:Number(track.duration) || 0, url:'' });
+    }
+    if (next) {
+      const requested = [...new Set(tracks.map(t => t.videoId!))].filter(id => id !== current.id);
+      const set = new Set(requested);
+      const remaining = order.filter(id => !set.has(id));
+      remaining.splice(remaining.indexOf(current.id) + 1, 0, ...requested);
+      this.deckOrder = remaining;
+    } else this.deckOrder = order;
+    this.ws.broadcast('queue', this.getQueueWithMetadata());
+    await this.notifyExternalStateChange();
+    return { ok:true, added };
+  }
 
   async queueNext(metadata: { videoId?: string; title?: string; artist?: string; albumArt?: string }) {
     const ids = this.deckOrder ?? this.queue.videoIds;
@@ -140,18 +193,47 @@ export class CastPlayer extends Player {
     // its status transition before the newest play begins. Otherwise an old
     // failed extraction can set STOPPED after a newer song is already playing.
     this.playbackGeneration++;
-    const operation = this.playChain.then(() => {
+    const operation = this.playChain.then(async () => {
       if (request !== this.playRequest) return false;
       this.activePlayRequest = request;
-      return super.play(video, position, AID);
+      let candidate = video;
+      const visited = new Set<string>();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        visited.add(candidate.id);
+        this.extractionFailure = null;
+        if (await super.play(candidate, attempt === 0 ? position : 0, AID)) return true;
+        const failure = this.extractionFailure as {id:string; generation:number} | null;
+        if (request !== this.playRequest || !failure || failure.id !== candidate.id ||
+            failure.generation !== this.playbackGeneration || this.sessionCleared) return false;
+        const ids = this.deckOrder ?? this.queue.videoIds;
+        const index = ids.indexOf(candidate.id);
+        const nextId = index >= 0 ? ids[index + 1] : undefined;
+        if (!nextId || visited.has(nextId) || attempt === 4) break;
+        candidate = { id:nextId, client:candidate.client, ...(!this.deckOrder ? {
+          context:{ playlistId:candidate.context?.playlistId, index:index + 1 },
+        } : {}) } as Video;
+      }
+      // Clear stale frontend audio as well as the sender's loading state.
+      // super.play already reports STOPPED on failure, so stop() would no-op.
+      await this.doStop();
+      return false;
     });
     this.playChain = operation.then(() => {}, () => {});
     return operation;
   }
+
+  override async pause(AID?: number | null): Promise<boolean> {
+    if ((await this.getState()).status === Constants.PLAYER_STATUSES.LOADING) {
+      this.playRequest++;
+      return this.stop(AID);
+    }
+    return super.pause(AID);
+  }
   private metadataCache: Map<string, AudioInfo> = new Map();
+  private enrichingMetadata = false;
+  private visibleMetadata: string[] = [];
+  private metadataFailures = new Map<string, number>();
   private volumeBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
-  private batchVolumeExtreme: number = 100;
-  private batchDirection: number = 0; // 1=up, -1=down, 0=undetermined
 
   constructor(options: CastPlayerOptions) {
     super();
@@ -177,9 +259,14 @@ export class CastPlayer extends Player {
 
   async syncSender(id: unknown): Promise<void> {
     if (!this.matchesPlayback(id)) return;
+    // An audio acknowledgement can arrive after a delayed sender transition.
+    // Confirm the real state, without undoing a phone pause.
+    if (this.playing && this.status !== Constants.PLAYER_STATUSES.PLAYING)
+      await this.notifyExternalStateChange(Constants.PLAYER_STATUSES.PLAYING);
     const current = await this.getState();
     if (!this.matchesPlayback(id) || current.queue.current?.id !== this.currentTrackInfo?.videoId) return;
     this.lastSenderSync = Date.now();
+    this.lastProgressSync = this.lastSenderSync;
     // A full snapshot makes the receiver resend nowPlaying, including after a
     // lost notification. A normal state diff can omit the unchanged video ID.
     this.emit('state', { current, previous:null });
@@ -189,10 +276,18 @@ export class CastPlayer extends Player {
     if (!this.matchesPlayback(id) || !Number.isFinite(currentTime) || currentTime < 0 ||
         !Number.isFinite(duration) || duration < 0) return;
     this.currentPosition = currentTime;
-    this.currentDuration = duration;
+    this.lastAudioReport = Date.now();
+    this.armHeartbeat();
+    if (currentTime > 2) this.failedTracks = 0;
+    if (duration > 0) this.currentDuration = duration;
     // Reuse the existing progress messages; no new idle timer or polling loop.
     if (this.playing && Date.now() - this.lastSenderSync >= 30000)
       void this.syncSender(id).catch(err => console.warn('[YTCast] State sync failed:', err));
+    else if (this.playing && Date.now() - this.lastProgressSync >= 5000) {
+      this.lastProgressSync = Date.now();
+      void this.notifyExternalStateChange(Constants.PLAYER_STATUSES.PLAYING)
+        .catch(err => console.warn('[YTCast] Progress sync failed:', err));
+    }
   }
 
   /**
@@ -202,6 +297,7 @@ export class CastPlayer extends Player {
   async handleTrackEnded(id: unknown): Promise<void> {
     if (!this.matchesPlayback(id) || this.endedPlaybackId === id) return;
     this.endedPlaybackId = id as string;
+    this.stopHeartbeat();
     this.playing = false;
     if (this.deckOrder) { await this.next(); return; }
 
@@ -233,6 +329,13 @@ export class CastPlayer extends Player {
    */
   async handlePlaybackError(id: unknown): Promise<void> {
     if (!this.matchesPlayback(id) || !this.currentTrackInfo || this.retryingPlaybackId === id) return;
+    if (this.retriedPlaybackId === id) {
+      if (++this.failedTracks > 5) { await this.stop(); return; }
+      this.retryingPlaybackId = id as string;
+      try { await this.next(); } finally { if (this.retryingPlaybackId === id) this.retryingPlaybackId = null; }
+      return;
+    }
+    this.retriedPlaybackId = id;
     this.retryingPlaybackId = id as string;
     const generation = this.playbackGeneration;
 
@@ -259,7 +362,8 @@ export class CastPlayer extends Player {
       });
       // Try advancing to the next track
       try {
-        await this.next();
+        if (++this.failedTracks > 5) await this.stop();
+        else await this.next();
       } catch {
         // Nothing more we can do
       }
@@ -275,6 +379,7 @@ export class CastPlayer extends Player {
    * Idempotent — no-ops if already cleared.
    */
   clearOnDisconnect(): void {
+    this.stopHeartbeat();
     this.deckOrder = null;
     this.playRequest++;
     this.playbackGeneration++;
@@ -321,7 +426,7 @@ export class CastPlayer extends Player {
       const cached = this.metadataCache.get(id);
       return {
         videoId: id,
-        title: cached?.title ?? id,
+        title: cached?.title ?? 'Loading song…',
         artist: cached?.artist ?? '',
         albumArt: cached?.albumArt ?? '',
         isCurrent: state.current?.id === id,
@@ -329,7 +434,9 @@ export class CastPlayer extends Player {
     });
 
     // Fetch oEmbed metadata for uncached items in the background
-    const uncachedIds = videoIds.filter((id) => !this.metadataCache.has(id));
+    // Only enrich the nearby queue, not thousands of tracks on every UI refresh.
+    const uncachedIds = videoIds.slice(Math.max(0, currentIndex - 3), Math.max(0, currentIndex) + 24)
+      .filter(id => !this.metadataCache.has(id) && Date.now() - (this.metadataFailures.get(id) ?? 0) > 60000);
     if (uncachedIds.length > 0) {
       void this.enrichQueueMetadata(uncachedIds);
     }
@@ -338,33 +445,54 @@ export class CastPlayer extends Player {
   }
 
   private async enrichQueueMetadata(videoIds: string[]): Promise<void> {
+    if (this.enrichingMetadata) return;
+    this.enrichingMetadata = true;
+    const generation = this.playbackGeneration;
     let enriched = false;
-    for (const id of videoIds) {
-      if (this.metadataCache.has(id)) continue;
-      const meta = await this.fetchMetadataFromOembed(id);
-      if (meta) {
-        this.metadataCache.set(id, {
-          videoId: id,
-          title: meta.title,
-          artist: meta.artist,
-          albumArt: meta.albumArt,
-          duration: 0,
-          url: '',
-        });
-        enriched = true;
+    try {
+      for (const id of videoIds) {
+        if (this.sessionCleared || generation !== this.playbackGeneration) break;
+        if (this.metadataCache.has(id)) continue;
+        const meta = await this.fetchMetadataFromOembed(id);
+        if (this.sessionCleared || generation !== this.playbackGeneration) break;
+        if (meta) {
+          this.metadataCache.set(id, { videoId:id, ...meta, duration:0, url:'' });
+          enriched = true;
+          // Show each result immediately instead of waiting for the entire batch.
+          this.ws.broadcast('queue', this.getQueueWithMetadata());
+        } else {
+          this.metadataFailures.set(id, Date.now());
+          if (this.metadataFailures.size > 128) this.metadataFailures.delete(this.metadataFailures.keys().next().value!);
+        }
       }
+      // Keep the single-flight guard while broadcasting; no recursive retries.
+      if (enriched && !this.sessionCleared) this.ws.broadcast('queue', this.getQueueWithMetadata());
+    } finally {
+      this.enrichingMetadata = false;
+      const pending = this.visibleMetadata;
+      this.visibleMetadata = [];
+      if (pending.length && !this.sessionCleared) void this.loadVisibleMetadata(pending);
     }
-    // If we enriched any items, broadcast updated queue
-    if (enriched) {
-      const updatedQueue = this.getQueueWithMetadata();
-      this.ws.broadcast('queue', updatedQueue);
+  }
+
+  async loadVisibleMetadata(ids: unknown): Promise<void> {
+    if (!Array.isArray(ids) || ids.length > 40 || this.sessionCleared) return;
+    const allowed = new Set(this.deckOrder ?? this.queue.videoIds);
+    const missing = [...new Set(ids)].filter((id): id is string =>
+      typeof id === 'string' && allowed.has(id) && !this.metadataCache.has(id) &&
+      Date.now() - (this.metadataFailures.get(id) ?? 0) > 60000);
+    // The current background batch finishes first; visible requests stay bounded.
+    if (this.enrichingMetadata) {
+      this.visibleMetadata = missing;
+      return;
     }
+    await this.enrichQueueMetadata(missing);
   }
 
   private async fetchMetadataFromOembed(videoId: string): Promise<{ title: string; artist: string; albumArt: string } | null> {
     try {
       const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-      const response = await fetch(url);
+      const response = await fetch(url, {signal:AbortSignal.timeout(5000)});
       if (!response.ok) return null;
       const data = await response.json() as { title?: string; author_name?: string; thumbnail_url?: string };
       return {
@@ -405,6 +533,7 @@ export class CastPlayer extends Player {
   // --- Player abstract method implementations ---
 
   protected async doPlay(video: Video, position: number): Promise<boolean> {
+    this.stopHeartbeat();
     if (this.activePlayRequest !== this.playRequest) return false;
     if (this.deckOrder && !this.deckOrder.includes(video.id)) this.deckOrder = null;
     const generation = ++this.playbackGeneration;
@@ -458,6 +587,7 @@ export class CastPlayer extends Player {
       return true;
     } catch (err) {
       if (generation !== this.playbackGeneration) return false;
+      this.extractionFailure = { id:video.id, generation };
       console.error(`[YTCast] doPlay failed for ${video.id}:`, (err as Error).message);
       this.ws.broadcast('error', {
         message: `Failed to play: ${(err as Error).message}`,
@@ -468,6 +598,8 @@ export class CastPlayer extends Player {
   }
 
   protected async doPause(): Promise<boolean> {
+    this.currentPosition = await this.doGetPosition();
+    this.stopHeartbeat();
     this.markSenderActivity();
     this.playing = false;
     this.ws.broadcast('state', {
@@ -490,6 +622,7 @@ export class CastPlayer extends Player {
   }
 
   protected async doStop(): Promise<boolean> {
+    this.stopHeartbeat();
     this.playbackGeneration++;
     this.playbackId = null;
     this.markSenderActivity();
@@ -502,6 +635,7 @@ export class CastPlayer extends Player {
   }
 
   protected async doSeek(position: number): Promise<boolean> {
+    this.stopHeartbeat();
     this.markSenderActivity();
     this.currentPosition = position;
     this.ws.broadcast('seek', { position });
@@ -512,43 +646,17 @@ export class CastPlayer extends Player {
     this.markSenderActivity();
     this.currentVolume = volume;
 
-    // The DIAL/Lounge protocol oscillates volume values after rapid changes.
-    // E.g. user presses up twice (50→55→60), then the protocol echoes 55
-    // back as an ack-correction. We track the extreme (max for up, min for
-    // down) in each batch and broadcast that, ignoring reversals.
-    const isNewBatch = !this.volumeBroadcastTimer;
-
+    // Coalesce rapid hardware-button changes, preserving the final direction.
     if (this.volumeBroadcastTimer) {
       clearTimeout(this.volumeBroadcastTimer);
     }
 
-    if (isNewBatch) {
-      this.batchVolumeExtreme = volume.level;
-      this.batchDirection = 0;
-    } else if (this.batchDirection === 0) {
-      // Second+ value in batch, direction not yet determined
-      if (volume.level > this.batchVolumeExtreme) {
-        this.batchDirection = 1;
-        this.batchVolumeExtreme = volume.level;
-      } else if (volume.level < this.batchVolumeExtreme) {
-        this.batchDirection = -1;
-        this.batchVolumeExtreme = volume.level;
-      }
-    } else {
-      // Direction established — extend extreme, ignore reversals (oscillation)
-      if (this.batchDirection > 0 && volume.level > this.batchVolumeExtreme) {
-        this.batchVolumeExtreme = volume.level;
-      } else if (this.batchDirection < 0 && volume.level < this.batchVolumeExtreme) {
-        this.batchVolumeExtreme = volume.level;
-      }
-    }
-
     this.volumeBroadcastTimer = setTimeout(() => {
       this.volumeBroadcastTimer = null;
-      this.ws.broadcast('volume', { value: this.batchVolumeExtreme, muted: this.currentVolume.muted });
+      this.ws.broadcast('volume', { value: this.currentVolume.level, muted: this.currentVolume.muted });
+      void this.store.set('volume', this.currentVolume);
     }, 300);
 
-    void this.store.set('volume', volume);
     return true;
   }
 
@@ -557,7 +665,9 @@ export class CastPlayer extends Player {
   }
 
   protected async doGetPosition(): Promise<number> {
-    return this.currentPosition;
+    if (!this.playing || !this.lastAudioReport) return this.currentPosition;
+    const delta = Math.min(15, Math.max(0, (Date.now() - this.lastAudioReport) / 1000));
+    return Math.min(this.currentDuration || Infinity, this.currentPosition + delta);
   }
 
   protected async doGetDuration(): Promise<number> {

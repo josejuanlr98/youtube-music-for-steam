@@ -16,10 +16,13 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
     const env = { ...process.env, LD_LIBRARY_PATH: '', PYTHONPATH: '' };
     const proc = spawn(
       ytdlpPath,
-      ['-f', 'bestaudio[ext=m4a]/bestaudio', '-j', '--no-playlist', '--', videoId],
+      ['--ignore-config', '--socket-timeout', '15', '--retries', '1',
+        '--js-runtimes', `node:${process.execPath}`, '--remote-components', 'ejs:github',
+        '-f', 'bestaudio[ext=m4a]/bestaudio', '-j', '--no-playlist', '--', videoId],
       { stdio: ['ignore', 'pipe', 'pipe'], env }
     );
 
+    const timeout = setTimeout(() => { proc.kill('SIGKILL'); reject(new Error('Audio lookup timed out. Please retry.')); }, 45000);
     let stdout = '';
     let stderr = '';
 
@@ -27,10 +30,12 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
     proc.on('error', (err) => {
+      clearTimeout(timeout);
       reject(new Error(`Failed to spawn yt-dlp: ${err.message}`));
     });
 
     proc.on('close', (code) => {
+      clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`));
         return;
@@ -38,6 +43,7 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
 
       try {
         const data = JSON.parse(stdout);
+        if (typeof data.url !== 'string' || !/^https?:\/\//.test(data.url)) throw new Error('No playable audio URL');
         resolve({
           videoId: data.id ?? videoId,
           title: data.title ?? 'Unknown',

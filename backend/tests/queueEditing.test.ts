@@ -16,6 +16,29 @@ function setup(ids = ['a','b','c','d']) {
   return { player, ws };
 }
 describe('Cast queue editing', () => {
+  it('puts a playlist next in source order without interrupting the current song', async () => {
+    const { player } = setup();
+    await player.appendTracks([{videoId:'d'}, {videoId:'e'}, {videoId:'c'}], true);
+    expect(player.getQueueWithMetadata().tracks.map(t => t.videoId)).toEqual(['a','b','d','e','c']);
+    expect(await player.getPosition()).toBe(42);
+    expect(player.isCurrentlyPlaying()).toBe(true);
+  });
+  it('appends a playlist without interrupting the song or duplicating Cast IDs', async () => {
+    const { player } = setup();
+    const play = vi.spyOn(player, 'play').mockResolvedValue(true);
+    expect(await player.appendTracks([{ videoId:'new', title:'New' }, {videoId:'b'}, {videoId:'new'}])).toEqual({ok:true, added:1});
+    expect(player.getQueueWithMetadata().tracks.map(t => t.videoId)).toEqual(['a','b','c','d','new']);
+    expect(await player.getPosition()).toBe(42);
+    expect(player.isCurrentlyPlaying()).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+    player.clearOnDisconnect();
+    expect((await player.appendTracks([{videoId:'another'}])).ok).toBe(false);
+  });
+  it('rejects malformed playlist additions atomically', async () => {
+    const { player } = setup();
+    expect((await player.appendTracks([{videoId:'new'}, {}])).ok).toBe(false);
+    expect(player.getQueueWithMetadata().tracks.map(t => t.videoId)).toEqual(['a','b','c','d']);
+  });
   it('adds a search result next without interrupting the current song', async () => {
     const { player } = setup();
     const play = vi.spyOn(player, 'play').mockResolvedValue(true);

@@ -28,6 +28,12 @@ export class JsonDataStore extends DataStore {
     return value !== undefined ? (value as T) : null;
   }
 
+  async remove(key: string): Promise<void> {
+    if (!(key in this.data)) return;
+    delete this.data[key];
+    this.scheduleSave();
+  }
+
   private loadFromDisk(): Record<string, unknown> {
     try {
       const content = fs.readFileSync(this.filePath, 'utf-8');

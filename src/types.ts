@@ -19,6 +19,7 @@ export interface PlayerState {
   repeat: RepeatMode;
   shuffle: boolean;
   authenticated: boolean;
+  authReady: boolean;
   hasCredentials: boolean;
   castConnected: boolean;
   castNetwork: { uuid: string | null; name: string | null; trusted: boolean };

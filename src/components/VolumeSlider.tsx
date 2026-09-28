@@ -1,9 +1,9 @@
-import { SliderField } from '@decky/ui';
+import { SliderField, gamepadSliderClasses } from '@decky/ui';
 import type { SliderFieldProps } from '@decky/ui';
 import { call } from '@decky/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FaVolumeUp } from 'react-icons/fa';
-import { setAudioVolume, getAudioElement } from '../services/audioManager';
+import { setAudioVolume, getAudioElement, getIsCastConnected, getAudioVolume, addVolumeListener } from '../services/audioManager';
 
 // Module-level cache — survives tab switches (component remounts)
 let cachedVolume: number | null = null;
@@ -14,7 +14,7 @@ export const PaddedSlider = (props: SliderFieldProps) => {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    const firstChild = ref.current.firstElementChild as HTMLElement | null;
+    const firstChild = ref.current.lastElementChild as HTMLElement | null;
     if (firstChild) {
       firstChild.style.paddingLeft = '19px';
       firstChild.style.paddingRight = '19px';
@@ -24,20 +24,23 @@ export const PaddedSlider = (props: SliderFieldProps) => {
     });
   }, []);
   return <div ref={ref} className="ytm-compact-slider" style={{ width:'100%', minWidth:0, maxWidth:'100%', borderRadius:8 }}>
+    <style>{`.ytm-compact-slider .${gamepadSliderClasses?.SliderTrack} { --left-track-color:rgb(var(--ytm-cover-accent,180,202,220)) !important; --colored-toggles-main-color:rgb(var(--ytm-cover-accent,180,202,220)) !important; }`}</style>
     <SliderField {...props} />
   </div>;
 };
 
 export const VolumeSlider = () => {
-  const [displayVolume, setDisplayVolume] = useState<number>(cachedVolume ?? 100);
+  const [displayVolume, setDisplayVolume] = useState<number>(getIsCastConnected() ? getAudioVolume() : cachedVolume ?? 100);
   const apiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch volume from backend on mount (if no cached value)
   useEffect(() => {
-    if (cachedVolume !== null) return;
+    if (getIsCastConnected() || cachedVolume !== null) return;
+    let alive = true;
     void (async () => {
       try {
         const result = await call<[], { volume: number }>('get_volume');
+        if (!alive || getIsCastConnected()) return;
         const vol = result.volume;
         cachedVolume = vol;
         setDisplayVolume(vol);
@@ -46,7 +49,13 @@ export const VolumeSlider = () => {
         console.error('[YTM] Failed to fetch volume:', e);
       }
     })();
+    return () => { alive = false; };
   }, []);
+  useEffect(() => addVolumeListener(value => {
+    if (apiDebounceRef.current) { clearTimeout(apiDebounceRef.current); apiDebounceRef.current = null; }
+    setDisplayVolume(value);
+    if (!getIsCastConnected()) cachedVolume = value;
+  }), []);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -61,7 +70,7 @@ export const VolumeSlider = () => {
 
     // Set <audio> volume immediately for instant response
     const audio = getAudioElement();
-    if (audio) audio.volume = Math.max(0, Math.min(1, val / 100));
+    if (audio) { audio.volume = Math.max(0, Math.min(1, val / 100)); audio.muted = false; }
 
     // Debounce the backend + PulseAudio call
     if (apiDebounceRef.current) clearTimeout(apiDebounceRef.current);

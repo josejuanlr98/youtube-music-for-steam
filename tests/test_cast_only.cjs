@@ -3,22 +3,24 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 const path = require('node:path');
-let state = { authenticated:false, track:{ videoId:'cast-song', title:'Song' }, castConnected:true, castNetwork:{ trusted:true }, repeat:'NONE' };
+let state = { authenticated:false, authReady:true, track:{ videoId:'cast-song', title:'Song' }, castConnected:true, castNetwork:{ trusted:true }, repeat:'NONE' };
 let effects = [], calls = [];
 const jsx = (type, props) => ({ type, props });
 const modules = {
   'react/jsx-runtime': { jsx, jsxs:jsx },
-  'react': { useState:value => [value, () => {}], useEffect:fn => effects.push(fn), useRef:()=>({current:null}) },
+  'react': { useState:value => [typeof value === 'function' ? value() : value, () => {}], useEffect:fn => effects.push(fn), useRef:()=>({current:null}) },
   '@decky/api': { call:async name => { calls.push(name); return { rating:'LIKE', playlists:[] }; } },
   '@decky/ui': { DialogButton:'button', Focusable:'focusable', Navigation:{} },
   '../context/PlayerContext': { usePlayer:() => state },
   '../services/audioManager': {},
   './Section': { Section:'section' },
+  './MediaRow': { MediaRow:'row', RowAction:'action' },
   './VolumeSlider': { VolumeSlider:'volume', PaddedSlider:'slider' },
   './LyricsPage': { LyricsPanel:'lyrics' },
   '../services/artworkPalette': { useArtworkAccent:() => '180,202,220' },
   './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
   './ThemeScope': { ThemeScope:'theme' },
+  './OverflowText': { OverflowText:'overflow-text' },
 };
 function load(file) {
   const exports = {};
@@ -38,7 +40,7 @@ const { LibraryView } = load('LibraryView.tsx');
 const { PlayerView } = load('PlayerView.tsx');
 (async () => {
   const guestLibrary = LibraryView({});
-  assert.equal(guestLibrary.type, 'section');
+  assert.equal(guestLibrary.type, 'div');
   assert.equal(effects.length, 0, 'guest library must not mount account fetching effects');
   const guestPlayer = flatten(PlayerView());
   for (const effect of effects) effect();
@@ -50,11 +52,12 @@ const { PlayerView } = load('PlayerView.tsx');
     assert.equal(guestPlayer.find(n => n.props?.onOKActionDescription === action).props.disabled, true);
   }
   assert.equal(guestPlayer.find(n => n.props?.children?.includes?.(' Lyrics')).props.disabled, true);
-  state = { ...state, authenticated:true };
+  state = { ...state, authenticated:true, authReady:true };
   effects = []; calls = [];
   const accountLibrary = LibraryView({});
-  assert.equal(typeof accountLibrary.type, 'function');
-  accountLibrary.type({});
+  const account = flatten(accountLibrary).find(n => typeof n.type === 'function');
+  assert(account);
+  account.type({});
   const accountPlayer = flatten(PlayerView());
   for (const effect of effects) effect();
   assert(calls.includes('get_library_playlists'));
