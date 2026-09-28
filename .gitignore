@@ -68,6 +68,7 @@ design/
 # Python dependencies (installed during packaging)
 py_modules/*
 !py_modules/ytm_lyrics.py
+!py_modules/ytm_firefox.py
 
 # Linux runtime binaries are downloaded by build.ps1 and shipped in Releases.
 bin/

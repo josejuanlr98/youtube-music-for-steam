@@ -1,10 +1,13 @@
 import sqlite3
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from test_regressions import module
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from ytm_firefox import read_firefox_headers
 
 
