@@ -11,6 +11,10 @@ export function currentLyric(lines: TimedLine[], position: number) {
   return { anchor, active };
 }
 
+// Offset the visual cue a fraction of a second to compensate for display
+// rendering and the interval between audio clock samples.
+const VISUAL_LEAD_SECONDS = 0.12;
+
 /** Follow actual audio positions, never an estimated wall-clock song timeline. */
 export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
   readPosition: () => number, subscribe: (listener: (position: number) => void) => (() => void),
@@ -19,7 +23,7 @@ export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
   let resumeTimer: ReturnType<typeof setTimeout> | undefined;
   const update = (position: number, force = false) => {
     if (disposed || !Number.isFinite(position)) return;
-    const next = currentLyric(lines, position);
+    const next = currentLyric(lines, position + VISUAL_LEAD_SECONDS);
     if (active !== next.active) { active = next.active; onActive(active); }
     if (!paused && (next.anchor !== anchor || force)) {
       const line = element.querySelector<HTMLElement>(`[data-lyric-index="${Math.max(0, next.anchor)}"]`);

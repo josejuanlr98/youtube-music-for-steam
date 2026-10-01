@@ -28,12 +28,19 @@ Pop-Location
 
 # --- Step 1b: Install Python runtime dependencies ---
 Write-Host "`n[1b/6] Installing Python dependencies..." -ForegroundColor Yellow
-if (!(Test-Path (Join-Path $PythonModulesDir "ytmusicapi"))) {
+if (!(Test-Path (Join-Path $PythonModulesDir "ytmusicapi")) -or !(Test-Path (Join-Path $PythonModulesDir "langdetect"))) {
     New-Item -ItemType Directory -Path $PythonModulesDir -Force | Out-Null
     python -m pip install --disable-pip-version-check --target $PythonModulesDir -r (Join-Path $ScriptDir "requirements.txt")
     if ($LASTEXITCODE -ne 0) { throw "Python dependency install failed" }
 } else {
-    Write-Host "  py_modules already contains ytmusicapi, skipping install" -ForegroundColor DarkGray
+    Write-Host "  py_modules already contains runtime dependencies, skipping install" -ForegroundColor DarkGray
+}
+
+# Cookie import uses Firefox-family SQLite profiles and needs no OS keyring.
+# Remove leftovers from earlier Chromium-enabled builds before packaging.
+foreach ($OldModule in @("browser_cookie3", "browser_cookie3-0.20.1.dist-info", "Cryptodome", "pycryptodomex-3.23.0.dist-info", "lz4", "lz4-4.4.5.dist-info", "jeepney", "jeepney-0.9.0.dist-info")) {
+    $OldPath = Join-Path $PythonModulesDir $OldModule
+    if (Test-Path $OldPath) { Remove-Item -LiteralPath $OldPath -Recurse -Force }
 }
 
 python (Join-Path $ScriptDir "scripts/patch_ytmusicapi.py")
@@ -126,9 +133,11 @@ Copy-Item (Join-Path $ScriptDir "plugin.json") (Join-Path $PluginDir "plugin.jso
 Copy-Item (Join-Path $ScriptDir "main.py") (Join-Path $PluginDir "main.py")
 Copy-Item (Join-Path $ScriptDir "LICENSE") (Join-Path $PluginDir "LICENSE")
 
-# Create ZIP
+# Create a Linux-friendly ZIP. Compress-Archive drops Unix executable bits,
+# which prevents SteamOS from starting the bundled Node and yt-dlp binaries.
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
-Compress-Archive -Path $PluginDir -DestinationPath $ZipPath
+python (Join-Path $ScriptDir "scripts/package_plugin.py") --source $PluginDir --output $ZipPath --name $PluginName
+if ($LASTEXITCODE -ne 0) { throw "Plugin ZIP packaging failed" }
 
 # Clean staging
 Remove-Item -Recurse -Force $StagingDir

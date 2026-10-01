@@ -12,6 +12,7 @@ const el={scrollTop:0,clientHeight:200,getBoundingClientRect:()=>({top:0}),
 };
 const follow=api.followSyncedLyrics(el,lines,()=>position,fn=>{listener=fn;return ()=>unsubscribed=true},i=>active.push(i));
 function progress(value){position=value;listener(value)}
+progress(1.9);assert.equal(active.at(-1),0,'visual cue leads the audio clock slightly');
 progress(2);assert.equal(active.at(-1),0);
 const count=moves.length;progress(3);assert.equal(moves.length,count,'same line must not repeatedly restart smooth scrolling');
 follow.pause();assert.equal(delay,3000);progress(6);assert.equal(active.at(-1),1);assert.equal(moves.length,count);

@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import { call, fetchNoCors } from '@decky/api';
 import { recordVisualDiagnostic } from './visualDiagnostics';
 
-export const defaultAccent = '180, 202, 220';
+// Neutral steel-blue sampled from the visual language of the "Nothing playing"
+// placeholder. It keeps the panel intentional after Stop and while a new cover
+// is being sampled, without borrowing color from the previous song.
+export const defaultAccent = '78, 108, 132';
 export type ArtworkPalette = [string, string, string];
-export const defaultPalette: ArtworkPalette = [defaultAccent, '72, 101, 137', '43, 66, 96'];
+export const defaultPalette: ArtworkPalette = [defaultAccent, '54, 74, 92', '34, 47, 61'];
 const cache = new Map<string, ArtworkPalette>();
 const pendingPalettes = new Map<string, Promise<ArtworkPalette>>();
 const localArtwork = new Map<string, Promise<string | undefined>>();
@@ -22,9 +25,14 @@ export function loadLocalArtwork(url: string): Promise<string | undefined> {
 /** A tiny, quantized palette: one 32px sample per cover, never per frame. */
 export function extractPalette(pixels: Uint8ClampedArray): ArtworkPalette {
   const bins = new Map<number, { count: number; r: number; g: number; b: number }>();
+  let opaquePixels = 0;
+  let luminanceTotal = 0;
   for (let i = 0; i < pixels.length; i += 4) {
     const [r, g, b, a] = pixels.subarray(i, i + 4);
-    if (a < 128 || Math.max(r, g, b) < 35 || Math.min(r, g, b) > 235) continue;
+    if (a < 128) continue;
+    opaquePixels++;
+    luminanceTotal += r * .2126 + g * .7152 + b * .0722;
+    if (Math.max(r, g, b) < 35 || Math.min(r, g, b) > 235) continue;
     const key = (r >> 5) * 64 + (g >> 5) * 8 + (b >> 5);
     const bin = bins.get(key) || { count: 0, r: 0, g: 0, b: 0 };
     bin.count++; bin.r += r; bin.g += g; bin.b += b;
@@ -35,7 +43,14 @@ export function extractPalette(pixels: Uint8ClampedArray): ArtworkPalette {
     const saturation = (Math.max(...rgb) - Math.min(...rgb)) / 255;
     return { rgb, weight:bin.count * (1 + saturation * 2) };
   }).sort((a, b) => b.weight - a.weight);
-  if (!ranked.length) return [...defaultPalette];
+  if (!ranked.length) {
+    if (!opaquePixels) return [...defaultPalette];
+    // Pure black/white artwork has no hue to borrow. Build an achromatic
+    // palette from its own luminance instead of introducing an unrelated color.
+    const luminance = luminanceTotal / opaquePixels;
+    const primary = Math.round(105 + (luminance / 255) * 85);
+    return [`${primary}, ${primary}, ${primary}`, `${Math.round(primary * .64)}, ${Math.round(primary * .64)}, ${Math.round(primary * .64)}`, `${Math.round(primary * .38)}, ${Math.round(primary * .38)}, ${Math.round(primary * .38)}`];
+  }
   const chosen: number[][] = [];
   for (const { rgb } of ranked) {
     // Prefer genuinely different cover colors over three neighboring bins.
@@ -153,17 +168,21 @@ export function preloadArtworkPalette(original: string, doc: Document): Promise<
 export function useArtworkPalette(url?: string, view?: { current: HTMLElement | null }) {
   const [value, setValue] = useState({ url, palette:url ? cache.get(url) || defaultPalette : defaultPalette });
   useEffect(() => {
-    // Keep the last resolved palette while the new cover is sampled: no neutral flash.
-    setValue(previous => ({ url, palette:url ? cache.get(url) || previous.palette : defaultPalette }));
+    // A different cover must never inherit the previous song's palette. Cached
+    // colors are immediate; uncached covers use the neutral placeholder until
+    // their own sample is ready.
+    setValue({ url, palette:url ? cache.get(url) || defaultPalette : defaultPalette });
     if (!url || cache.has(url)) return;
     let alive = true;
     const pending = preloadArtworkPalette(url, view?.current?.ownerDocument || document);
     void pending.then(color => {
-      if (alive) setValue(previous => ({ url, palette:color === defaultPalette ? previous.palette : color }));
+      if (alive) setValue({ url, palette:color });
     });
     return () => { alive = false; };
   }, [url]);
-  return value.url === url ? value.palette : url ? cache.get(url) || value.palette : defaultPalette;
+  // Effects run after render, so also guard this render-time URL transition.
+  // This removes the one-frame flash of the old song color.
+  return value.url === url ? value.palette : url ? cache.get(url) || defaultPalette : defaultPalette;
 }
 
 export async function artworkAccent(original: string, doc: Document) {

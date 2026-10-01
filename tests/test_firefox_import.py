@@ -45,6 +45,16 @@ class FirefoxImportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(headers["authorization"].startswith("SAPISIDHASH "))
                 self.assertEqual(database.read_bytes(), before)
 
+    async def test_zen_profile_is_discovered_without_profiles_ini(self):
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home) / ".var/app/app.zen_browser.zen/.zen/profiles/abc.default"
+            root.mkdir(parents=True)
+            db = sqlite3.connect(root / "cookies.sqlite")
+            db.execute("CREATE TABLE moz_cookies (name TEXT,value TEXT,host TEXT,path TEXT,expiry INTEGER,originAttributes TEXT)")
+            db.execute("INSERT INTO moz_cookies VALUES (?,?,?,?,?,?)", ("__Secure-3PAPISID", "zen-cookie", ".youtube.com", "/", 0, ""))
+            db.commit(); db.close()
+            self.assertIn("zen-cookie", read_firefox_headers(home)["cookie"])
+
     async def test_missing_profile_has_actionable_message(self):
         with tempfile.TemporaryDirectory() as home:
             with self.assertRaisesRegex(ValueError, "Desktop Mode"):

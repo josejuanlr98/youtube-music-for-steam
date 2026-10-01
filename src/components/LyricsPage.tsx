@@ -1,8 +1,8 @@
 import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab } from '@decky/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaExpand } from 'react-icons/fa';
-import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, addProgressListener, playNext, playPrevious, togglePlayback } from '../services/audioManager';
-import { loadLyrics, type LyricsResult } from '../services/lyrics';
+import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, getLivePlaybackPosition, addProgressListener, addPlayStateListener, getIsPlaying, playNext, playPrevious, togglePlayback } from '../services/audioManager';
+import { loadLyrics, loadTranslatedLyrics, type LyricsResult } from '../services/lyrics';
 import { focusLyricsReader } from '../services/focus';
 
 import { MdCastConnected } from 'react-icons/md';
@@ -10,6 +10,7 @@ import { SiYoutubemusic } from 'react-icons/si';
 import { followSyncedLyrics } from '../services/syncedLyrics';
 import { startLyricsScroll } from '../services/lyricsScroll';
 import { suppressFullscreenNotifications } from '../services/notifications';
+import { useI18n } from '../services/i18n';
 import { useArtworkPalette } from '../services/artworkPalette';
 import { ArtworkBackdrop } from './ArtworkBackdrop';
 import { ThemeScope } from './ThemeScope';
@@ -28,18 +29,23 @@ interface LyricsPanelProps {
  * dedicated route. The two views share the same data and gamepad controls.
  */
 export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) => {
+  const { t, translateLyrics, resolvedTranslationLanguage } = useI18n();
   const [track, setTrack] = useState(getCurrentTrack);
+  const [playing, setPlaying] = useState(getIsPlaying);
   const [cast, setCast] = useState(() => ({ connected:getIsCastConnected(), sender:getCastSenderName() }));
   const [result, setResult] = useState<LyricsResult>({});
+  const [translatedLines, setTranslatedLines] = useState<string[] | null>(null);
+  const [translationError, setTranslationError] = useState('');
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeLine, setActiveLine] = useState(-1);
-  const autoScroll = useRef<ReturnType<typeof startLyricsScroll> | null>(null);
+  const autoScroll = useRef<{ pause():void; dispose():void; setPlaying?(value:boolean):void } | null>(null);
   useEffect(() => focusLyricsReader(fullScreen ? rootRef.current : scrollRef.current), [fullScreen]);
   useEffect(() => addTrackChangeListener(setTrack), []);
+  useEffect(() => addPlayStateListener(setPlaying), []);
 
   useEffect(() => {
     let alive = true;
@@ -54,6 +60,19 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     }
     return () => { alive = false; };
   }, [track?.videoId, attempt]);
+
+  useEffect(() => {
+    let alive = true;
+    setTranslatedLines(null);
+    setTranslationError('');
+    if (translateLyrics && result.lyrics) {
+      const text = result.timedLines?.length ? result.timedLines.map(line => line.text).join('\n') : result.lyrics;
+      void loadTranslatedLyrics(text, resolvedTranslationLanguage)
+        .then(lines => { if (alive) setTranslatedLines(lines); })
+        .catch(error => { if (alive) setTranslationError(error instanceof Error ? error.message : 'Translation is temporarily unavailable'); });
+    }
+    return () => { alive = false; };
+  }, [translateLyrics, resolvedTranslationLanguage, result.lyrics, result.timedLines]);
 
   // Deck exposes this store in SteamOS. BlockSuspendAction prevents the Deck
   // from suspending while the dedicated reader is open; the browser wake lock
@@ -97,12 +116,20 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     if (loading || !result.lyrics || !scrollRef.current) return;
     const lines = result.timedLines;
     const motion = lines?.length
-      ? followSyncedLyrics(scrollRef.current, lines, () => getProgress().position, addProgressListener, setActiveLine)
-      : fullScreen ? startLyricsScroll(scrollRef.current) : null;
+      ? followSyncedLyrics(scrollRef.current, lines, getLivePlaybackPosition, listener => {
+          const unsubscribe = addProgressListener(listener);
+          const timer = window.setInterval(() => listener(getLivePlaybackPosition()), 100);
+          return () => { unsubscribe(); window.clearInterval(timer); };
+        }, setActiveLine)
+      : fullScreen ? startLyricsScroll(scrollRef.current, translatedLines ? 0 : 2000) : null;
     if (!motion) return;
+    if (!lines?.length) (motion as { setPlaying?(value:boolean):void }).setPlaying?.(playing);
     autoScroll.current = motion;
     return () => { motion.dispose(); autoScroll.current = null; };
-  }, [fullScreen, loading, result.lyrics, result.timedLines, track?.videoId]);
+  }, [fullScreen, loading, result.lyrics, result.timedLines, translatedLines, track?.videoId]);
+  useEffect(() => {
+    if (!result.timedLines?.length) autoScroll.current?.setPlaying?.(playing);
+  }, [playing, result.timedLines]);
   const centered = fullScreen && (!track || (!loading && !result.lyrics && !result.error));
   const source = lyricsSource(result.source);
   const pauseMotion = () => autoScroll.current?.pause();
@@ -155,31 +182,34 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     ? { width: '100%', maxWidth: '100%', minWidth: 0, top: 40, bottom: 40, left: 0, right: 0, minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' as const, padding: '16px clamp(16px, 3vw, 42px)', display: 'flex', flexDirection: 'column' as const, background: '#080b11', position: 'fixed' as const, outline:'none' }
     : { position:'relative', isolation:'isolate', width: '100%', maxWidth: '100%', minWidth: 0, height: '100%', minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' as const, padding: '6px 4px 4px', display: 'flex', flexDirection: 'column' as const, gap: 8, background: '#101823' };
   const readerStyle = fullScreen
-    ? { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: 'clamp(18px, 3vw, 40px)', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, textAlign: 'center' as const, fontSize: 'clamp(20px, 2.1vw, 32px)', lineHeight: 1.8, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const }
+    ? { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: 'clamp(18px, 3vw, 40px)', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, textAlign: 'center' as const, fontFamily:'"YouTube Sans", Roboto, Arial, sans-serif', fontSize: 'clamp(20px, 2.1vw, 32px)', lineHeight: 1.72, letterSpacing:'-.014em', whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const }
     : { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: '10px 12px', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'smooth' as const, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const };
 
   const lyricsContent = loading
-    ? <div className="ytm-muted" style={fullScreen ? { height:'100%', display:'grid', placeItems:'center', fontSize:12, fontWeight:400, opacity:.55 } : undefined}>Loading lyrics…</div>
+    ? <div className="ytm-muted" style={fullScreen ? { height:'100%', display:'grid', placeItems:'center', fontSize:12, fontWeight:400, opacity:.55 } : undefined}>{t('lyrics.loading')}</div>
     : result.error
       ? <span style={{ color: '#ffc3cb' }}>{result.error}</span>
       : result.timedLines?.length
         ? <div style={{ paddingBlock:fullScreen ? '26vh' : '8vh' }}>
             {result.timedLines.map((line, index) => <div key={index} data-lyric-index={index}
               className={`ytm-lyric-line${index === activeLine ? ' ytm-lyric-active' : ''}`}
-              style={{ display:'block', position:'relative', padding:fullScreen ? '18px 0' : '9px 0', margin:0, lineHeight:1.6, fontWeight:600, whiteSpace:'pre-wrap', color:index === activeLine ? '#fff' : 'rgba(255,255,255,.42)' }}>
+              style={{ display:'block', position:'relative', padding:fullScreen ? '18px 0' : '9px 0', margin:0, lineHeight:1.6, fontWeight:fullScreen ? 650 : 600, whiteSpace:'pre-wrap', color:index === activeLine ? '#fff' : 'rgba(255,255,255,.42)' }}>
               <span style={{ display:'block', transform:index === activeLine ? `scale(${fullScreen ? 1.08 : 1.03})` : `scale(${fullScreen ? .90 : .92})`, opacity:index === activeLine ? 1 : .68, transformOrigin:'center', transition:'transform 220ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease-out' }}>{line.text || '\u00a0'}</span>
+              {translatedLines?.[index] && translatedLines[index] !== line.text && <span style={{display:'block',fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:'#c6d6e5',opacity:index === activeLine ? .92 : .27,transform:index === activeLine ? 'scale(1)' : 'scale(.94)',transformOrigin:'center',transition:'opacity 220ms ease-out, transform 220ms cubic-bezier(.2,.8,.2,1)',lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></span>}
             </div>)}
           </div>
-        : result.lyrics || (track ? 'Lyrics not available' : 'Your next song starts here.');
+        : result.lyrics
+          ? translatedLines ? <div>{result.lyrics.split('\n').map((line,index) => <div key={index} style={{marginBottom:fullScreen ? 18 : 10}}><div>{line || '\u00a0'}</div>{translatedLines[index] && translatedLines[index] !== line && <div style={{fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:'#c6d6e5',opacity:.82,lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></div>}</div>)}</div> : result.lyrics
+          : (track ? 'Lyrics not available' : 'Your next song starts here.');
 
   return (
     <Focusable ref={rootRef} tabIndex={fullScreen ? 0 : undefined} preferredFocus={fullScreen} noFocusRing className={`ytm-ui ytm-lyrics-view${fullScreen ? ' ytm-immersive' : ''}`} flow-children="vertical"
       style={{ ...rootStyle, '--ytm-cover-accent':accent } as CSSProperties & { '--ytm-cover-accent':string }}
       onCancelButton={event => { event.preventDefault(); event.stopPropagation(); leave(); }}
-      onSecondaryActionDescription={!fullScreen ? 'Fullscreen' : undefined}
+      onSecondaryActionDescription={!fullScreen ? t('lyrics.fullscreen') : undefined}
       onSecondaryButton={!fullScreen ? event => { event.preventDefault(); event.stopPropagation(); openFullscreen(); } : undefined}
-      onCancelActionDescription="Back to player"
-      onOKActionDescription={fullScreen ? 'Play / pause' : undefined}
+      onCancelActionDescription={t('common.back')}
+      onOKActionDescription={fullScreen ? `${t('player.play')} / ${t('player.pause')}` : undefined}
       onOKButton={fullScreen ? event => { event.preventDefault(); event.stopPropagation(); if (track) togglePlayback(); } : undefined}
       onGamepadDirection={fullScreen ? event => {
         const button = event.detail.button;
@@ -200,9 +230,9 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       {fullScreen && <ArtworkBackdrop palette={palette} animated />}
       {!fullScreen && <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexShrink: 0, minHeight:28, alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
         {!fullScreen && <SiYoutubemusic className="ytm-cover-logo" size={22} style={{ color:`rgb(${accent})`, flexShrink:0 }} aria-label="YouTube Music" />}
-        <div style={{ minWidth: 0, textAlign:'left', flex: 1, padding:0 }}><div style={{ fontSize:15, fontWeight:700 }}>Lyrics</div></div>
-        {!fullScreen && <DialogButton className="ytm-button" aria-label="Fullscreen" onOKActionDescription="Fullscreen" style={{ width:32, flexShrink:0, minWidth:32, height:28, minHeight:28, padding:0, margin:0, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={openFullscreen}><FaExpand size={13} /></DialogButton>}
-        <DialogButton className="ytm-button" onOKActionDescription="Back" style={{ width:72, minWidth:0, height:28, minHeight:28, padding:'0 8px', lineHeight:'28px', margin:0, fontSize:11 }} onClick={leave}><FaArrowLeft /> Back</DialogButton>
+        <div style={{ minWidth: 0, textAlign:'left', flex: 1, padding:0 }}><div style={{ fontSize:15, fontWeight:700 }}>{t('lyrics.title')}</div></div>
+        {!fullScreen && <DialogButton className="ytm-button" aria-label={t('lyrics.fullscreen')} onOKActionDescription={t('lyrics.fullscreen')} style={{ width:32, flexShrink:0, minWidth:32, height:28, minHeight:28, padding:0, margin:0, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={openFullscreen}><FaExpand size={13} /></DialogButton>}
+        <DialogButton className="ytm-button" onOKActionDescription={t('common.back')} style={{ width:72, minWidth:0, height:28, minHeight:28, padding:'0 8px', lineHeight:'28px', margin:0, fontSize:11 }} onClick={leave}><FaArrowLeft /> {t('common.back')}</DialogButton>
       </div>}
       <div className="ytm-lyrics-layout" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'row', gap: fullScreen ? 'clamp(18px, 4vw, 54px)' : 10, flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', alignItems: fullScreen ? 'center' : 'stretch', justifyContent:fullScreen ? 'center' : undefined, maxWidth:fullScreen ? 860 : undefined, width:'100%', margin:fullScreen ? '0 auto' : undefined }}>
         <div className="ytm-cover-column" style={{ width: fullScreen ? 'min(26vw, 260px, max(80px, calc(100vh - 360px)))' : 78, minWidth: fullScreen ? 80 : 78, maxWidth: fullScreen ? (centered ? '80%' : '30%') : 78, maxHeight:fullScreen ? '100%' : undefined, flex: '0 0 auto', overflowY: fullScreen ? 'auto' : 'hidden', textAlign: fullScreen ? 'center' : 'left', paddingBlock:fullScreen ? 8 : 0, boxSizing:'border-box' }}>
@@ -220,10 +250,11 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
           {source && <div className="ytm-lyrics-source" style={{ marginTop:12, fontSize:fullScreen ? 10 : 9, lineHeight:1.4, color:`rgb(${accent})`, opacity:.82, overflowWrap:'anywhere' }}>
             Source: {source}
           </div>}
+          {translationError && <div role="status" style={{ marginTop:8, fontSize:fullScreen ? 10 : 9, lineHeight:1.35, color:'#c6d6e5', opacity:.75, overflowWrap:'anywhere' }}>{translationError}</div>}
         </div>
         {!centered && <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 0', maxWidth:fullScreen ? 620 : undefined, alignSelf: 'stretch', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
           <Focusable ref={scrollRef} preferredFocus={!fullScreen} noFocusRing tabIndex={0} onWheel={pauseMotion} onTouchStart={pauseMotion} onTouchMove={pauseMotion} onPointerDown={pauseMotion} focusClassName="ytm-reader-focus"
-            className="ytm-reader ytm-card" role="region" aria-label="Song lyrics"
+            className="ytm-reader ytm-card" role="region" aria-label={t('lyrics.region')}
             onGamepadDirection={event => {
               const button = event.detail.button;
               if (button === GamepadButton.DIR_UP || button === GamepadButton.DIR_DOWN) {
@@ -239,7 +270,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
             {lyricsContent}
           </Focusable>
           {result.error && <Focusable flow-children="horizontal" style={{ display: 'flex', flexShrink: 0, justifyContent: 'center', minWidth: 0 }}>
-            <DialogButton className="ytm-button" style={{ width: 96, minWidth: 0, height: 32, minHeight: 32, padding: '0 8px', margin: 0, lineHeight: '32px', fontSize: 12 }} onClick={() => setAttempt(value => value + 1)}>Retry</DialogButton>
+            <DialogButton className="ytm-button" style={{ width: 96, minWidth: 0, height: 32, minHeight: 32, padding: '0 8px', margin: 0, lineHeight: '32px', fontSize: 12 }} onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</DialogButton>
           </Focusable>}
         </div>}
       </div>

@@ -98,6 +98,17 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   assert.equal(notificationStore.PlayNotificationSound, originalSound, 'unload restores native sound playback');
   const stopAgain = exportsObject.initNotifications();
   await exportsObject.loadNotificationSettings();
+  const beforeManualPick = toasts.length;
+  exportsObject.suppressPlaybackNotification('picked-in-library');
+  listeners.playing({ ...track, videoId:'picked-in-library' });
+  assert.equal(toasts.length, beforeManualPick, 'a song selected inside Library stays quiet');
+  listeners.playing({ ...track, videoId:'automatic-next' });
+  assert.equal(toasts.length, beforeManualPick + 1, 'the following automatic song change still notifies');
+  listeners.playing({ ...track, videoId:'selected-from-search' }, true);
+  listeners.playing({ ...track, videoId:'selected-from-playlist' }, true);
+  assert.equal(toasts.length, beforeManualPick + 1, 'manual playback from Search and playlists never notifies');
+  listeners.playing({ ...track, videoId:'next-after-selection' }, false);
+  assert.equal(toasts.length, beforeManualPick + 2, 'automatic advancement after a manual selection notifies');
   listeners.sender('Steamcord loaded first');
   assert.equal(toasts.at(-1).title.props.children, 'Steamcord loaded first');
   assert.equal(chats, 1, 'works regardless of plugin load order');

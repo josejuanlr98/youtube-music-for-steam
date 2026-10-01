@@ -17,7 +17,7 @@ const safeAvatar = (value?:string) => {
 };
 const notificationArtSize = 'clamp(52px, 6vh, 68px)';
 const notificationLogo = (avatar?:string) => safeAvatar(avatar)
-  ? <img src={safeAvatar(avatar)} alt="" referrerPolicy="no-referrer" style={{width:notificationArtSize,height:notificationArtSize,minWidth:notificationArtSize,flex:'0 0 auto',aspectRatio:'1 / 1',display:'block',objectFit:'cover',borderRadius:'50%',margin:0}} onError={event => { event.currentTarget.style.display='none'; }} />
+  ? <img src={safeAvatar(avatar)} alt="" referrerPolicy="no-referrer" style={{width:notificationArtSize,height:notificationArtSize,minWidth:notificationArtSize,flex:'0 0 auto',alignSelf:'center',display:'block',objectFit:'cover',borderRadius:7,margin:0}} onError={event => { event.currentTarget.style.visibility='hidden'; }} />
   : <div style={{ width:notificationArtSize, height:notificationArtSize, minWidth:notificationArtSize, aspectRatio:'1 / 1', display:'flex', alignItems:'center', justifyContent:'center', alignSelf:'center', flexShrink:0, overflow:'visible', background:'transparent', margin:0 }}>
       <SiYoutubemusic size={48} style={{ width:'78%', height:'78%', display:'block', flexShrink:0, color:'#ffffff' }} />
     </div>;
@@ -53,6 +53,12 @@ export function suppressFullscreenNotifications() {
   return () => { if (!released) { released = true; fullscreenReaders--; } };
 }
 let loading: Promise<NotificationSettings> | null = null;
+const quietPlayback = new Map<string, number>();
+/** Silence a user-selected song while still notifying later automatic changes. */
+export function suppressPlaybackNotification(videoId:string) {
+  if (!videoId) return;
+  quietPlayback.set(videoId, Date.now() + 15000);
+}
 export function loadNotificationSettings(): Promise<NotificationSettings> {
   if (!loading) loading = call<[], NotificationSettings>('get_notification_settings').then(value => {
     settings = value; ready = true; return { ...settings };
@@ -122,9 +128,12 @@ export function initNotifications() {
       if (settings.connections) toast({ title:toastTitle(name || 'Device connected'), body:toastDetail('Connected · YouTube Music'), logo:notificationLogo(avatar), playSound:settings.connectionSound });
     }),
     addTrackChangeListener(track => { if (!track) lastTrack = ''; }),
-    addPlaybackStartedListener(track => {
+    addPlaybackStartedListener((track, manual) => {
       if (!track.videoId || lastTrack === track.videoId) return;
       lastTrack = track.videoId;
+      const quietUntil = quietPlayback.get(track.videoId) || 0;
+      quietPlayback.delete(track.videoId);
+      if (manual || quietUntil > Date.now()) return;
       if (!settings.tracks) return;
       toast({ title:toastTitle(track.title || 'Now playing'), body:toastDetail(track.artist || 'YouTube Music'),
         logo:track.albumArt ? <img src={track.albumArt} alt="" style={{ width:notificationArtSize, height:notificationArtSize, minWidth:notificationArtSize, flex:'0 0 auto', alignSelf:'center', display:'block', objectFit:'cover', borderRadius:7, margin:0 }} onError={event => { event.currentTarget.style.visibility = 'hidden'; }} /> : notificationLogo(),
@@ -132,5 +141,5 @@ export function initNotifications() {
     }),
   ];
   void loadNotificationSettings().catch(error => console.warn('[YTM] Could not load notification preferences', error));
-  return () => { alive = false; ready = false; dismissVisible = undefined; removers.forEach(remove => remove()); timers.forEach(clearTimeout); active.forEach(item => item.dismiss()); soundPatch?.unpatch(); };
+  return () => { alive = false; ready = false; quietPlayback.clear(); dismissVisible = undefined; removers.forEach(remove => remove()); timers.forEach(clearTimeout); active.forEach(item => item.dismiss()); soundPatch?.unpatch(); };
 }

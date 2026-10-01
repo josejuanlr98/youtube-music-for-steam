@@ -2,12 +2,14 @@ import { DialogButton, Navigation, Focusable } from '@decky/ui';
 import { call } from '@decky/api';
 import { useEffect, useRef, useState } from 'react';
 import { FaSearch } from 'react-icons/fa';
-import { MdPlaylistAdd, MdPlaylistPlay, MdRefresh, MdSort, MdEdit, MdCheck, MdArrowUpward, MdArrowDownward } from 'react-icons/md';
+import { MdPlayArrow, MdChevronRight, MdRefresh, MdSort, MdEdit, MdCheck, MdArrowUpward, MdArrowDownward } from 'react-icons/md';
 import { IoShuffleOutline as MdShuffle } from 'react-icons/io5';
-import { playTrack, getIsCastConnected, castRequest, type TrackInfo } from '../services/audioManager';
 import { usePlayer } from '../context/PlayerContext';
 import { ThemeScope } from './ThemeScope';
 import { MediaRow, RowAction } from './MediaRow';
+import { performPlaylistAction, type PlaylistAction } from '../services/playlistActions';
+import { PLAYLIST_ROUTE, LIBRARY_RETURN_EVENT, selectPlaylist, consumeLibraryReturn, libraryReturnPending, selectedPlaylist } from '../services/playlistNavigation';
+import { useI18n } from '../services/i18n';
 
 interface PlaylistEntry { playlistId: string; title: string; count: number | null; thumbnail: string | null }
 const LIKED_SONGS_ART = 'https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-1200.png';
@@ -19,15 +21,17 @@ function savedOrder(): { mode:number; ids:string[] } {
   } catch { return { mode:0, ids:[] }; }
 }
 export const LibraryView = ({ onSwitchToPlayer }: { onSwitchToPlayer?: () => void }) => {
+  const { t } = useI18n();
   const { authenticated, authReady } = usePlayer();
   return <div className="ytm-ui ytm-collection"><ThemeScope />
     {!authReady ? <div className="ytm-empty" role="status" aria-live="polite" /> : authenticated ? <AccountLibrary onSwitchToPlayer={onSwitchToPlayer} /> : <div className="ytm-empty">
-      <strong>Cast only</strong><p>Sign in to access your library, search and likes.</p>
-      <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/auth'); }}>Sign in to YouTube Music</DialogButton>
+      <strong>{t('library.castOnly')}</strong><p>{t('library.signInHint')}</p>
+      <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/auth'); }}>{t('library.signIn')}</DialogButton>
     </div>}
   </div>;
 };
 const AccountLibrary = ({ onSwitchToPlayer }: { onSwitchToPlayer?: () => void }) => {
+  const { t } = useI18n();
   const { updateState } = usePlayer();
   const [playlists, setPlaylists] = useState<PlaylistEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +41,9 @@ const AccountLibrary = ({ onSwitchToPlayer }: { onSwitchToPlayer?: () => void })
   const [sort, setSort] = useState(() => savedOrder().mode);
   const [manualIds, setManualIds] = useState<string[]>(() => savedOrder().ids);
   const [editingOrder, setEditingOrder] = useState(false);
+  const [returnRequest, setReturnRequest] = useState(() => libraryReturnPending() ? 1 : 0);
   const [moveFocus, setMoveFocus] = useState({id:'', direction:0, sequence:0});
+  const rootRef = useRef<HTMLDivElement>(null);
   const rank = new Map(manualIds.map((id,index) => [id,index]));
   const orderedPlaylists = sort === 0 ? playlists : sort === 3 ? [...playlists].sort((a,b) => (rank.get(a.playlistId) ?? Infinity) - (rank.get(b.playlistId) ?? Infinity)) : [...playlists].sort((a,b) =>
     (sort === 1 ? 1 : -1) * a.title.localeCompare(b.title, undefined, { numeric:true, sensitivity:'base' }));
@@ -65,58 +71,65 @@ const AccountLibrary = ({ onSwitchToPlayer }: { onSwitchToPlayer?: () => void })
     finally { if (alive.current) setLoading(false); }
   };
   useEffect(() => { alive.current = true; void fetchPlaylists(); return () => { alive.current = false; }; }, []);
-  const act = async (playlist: PlaylistEntry, mode: 'play' | 'shuffle' | 'append' | 'next') => {
+  useEffect(() => {
+    const onReturn = () => setReturnRequest(value => value + 1);
+    window.addEventListener(LIBRARY_RETURN_EVENT, onReturn);
+    return () => window.removeEventListener(LIBRARY_RETURN_EVENT, onReturn);
+  }, []);
+  useEffect(() => {
+    if (loading || !libraryReturnPending()) return;
+    const scroll = rootRef.current?.closest<HTMLElement>('[class*="TabContentsScroll"]');
+    if (!scroll) return;
+    const snapshot = consumeLibraryReturn();
+    if (!snapshot) return;
+    const view = scroll.ownerDocument.defaultView;
+    const frame = view?.requestAnimationFrame(() => { scroll.scrollTop = snapshot.libraryScrollTop; });
+    return () => { if (frame) view?.cancelAnimationFrame(frame); };
+  }, [loading, playlists, returnRequest]);
+  const openPlaylist = (playlist: PlaylistEntry) => {
+    const scroll = rootRef.current?.closest<HTMLElement>('[class*="TabContentsScroll"]');
+    selectPlaylist({ ...playlist, thumbnail:playlist.playlistId === 'LM' ? LIKED_SONGS_ART : playlist.thumbnail, libraryScrollTop:scroll?.scrollTop ?? 0 });
+    Navigation.CloseSideMenus();
+    Navigation.Navigate(PLAYLIST_ROUTE);
+  };
+  const act = async (playlist: PlaylistEntry, mode: PlaylistAction) => {
     if (busy.current) return;
     busy.current = true; setPending(playlist.playlistId); setError(''); setNotice('');
     try {
-      if (mode === 'append' || mode === 'next') {
-        if (getIsCastConnected()) {
-          const data = await call<[string], { tracks?: TrackInfo[]; error?: string }>('get_playlist_tracks', playlist.playlistId);
-          if (data.error) throw new Error(data.error);
-          const result = await castRequest('/api/queue/append', { tracks:data.tracks, next:mode === 'next' });
-          if (alive.current) setNotice(`Added ${result.added} songs to the Cast queue.`);
-        } else {
-          const result = await call<[string], { added?: number; error?: string }>(mode === 'next' ? 'queue_playlist_next' : 'append_playlist', playlist.playlistId);
-          if (result.error) throw new Error(result.error);
-          if (alive.current) setNotice(`Added ${result.added} songs to the queue.`);
-        }
-      } else {
-        const result = await call<[string, boolean], TrackInfo & { error?: string; initialIds?:string[] }>('start_playlist', playlist.playlistId, mode === 'shuffle');
-        if (result.error || !result.url) throw new Error(result.error || 'Could not play this playlist.');
-        await playTrack(result);
-        if (result.initialIds) void call<[string, string[], boolean], unknown>('complete_playlist', playlist.playlistId, result.initialIds, mode === 'shuffle').catch(() => {});
+      const result = await performPlaylistAction(playlist.playlistId, mode);
+      if (result.started) {
         updateState({ shuffle:mode === 'shuffle' });
         if (alive.current) onSwitchToPlayer?.();
-      }
+      } else if (alive.current) setNotice(`Added ${result.added} songs to the ${result.cast ? 'Cast queue' : 'queue'}.`);
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Could not load playlist. Please retry.'); }
     finally { busy.current = false; if (alive.current) setPending(null); }
   };
-  return <Focusable flow-children="vertical"
+  return <Focusable ref={rootRef} flow-children="vertical"
     onSecondaryActionDescription={sort === 3 ? (editingOrder ? 'Done reordering' : 'Edit order') : undefined}
     onSecondaryButton={sort === 3 ? event => { event.preventDefault(); event.stopPropagation(); setEditingOrder(value => !value); } : undefined}
     onCancelActionDescription={editingOrder ? 'Done reordering' : undefined}
     onCancelButton={editingOrder ? event => { event.preventDefault(); event.stopPropagation(); setEditingOrder(false); } : undefined}>
-    <div className="ytm-collection-heading"><span>Your library <span className="ytm-muted" style={{fontSize:10}}>{['', 'A–Z', 'Z–A', 'Custom'][sort]}</span></span><Focusable flow-children="horizontal" style={{display:'flex',gap:4}}>
-      {sort === 3 && <RowAction label={editingOrder ? 'Done reordering' : 'Edit custom order'} onClick={() => setEditingOrder(value => !value)}>{editingOrder ? <MdCheck size={18} /> : <MdEdit size={17} />}</RowAction>}
+    <div className="ytm-collection-heading"><span>{t('library.title')} <span className="ytm-muted" style={{fontSize:10}}>{['', 'A–Z', 'Z–A', 'Custom'][sort]}</span></span><Focusable flow-children="horizontal" style={{display:'flex',gap:4}}>
+      {sort === 3 && <RowAction label={editingOrder ? t('library.done') : t('library.edit')} onClick={() => setEditingOrder(value => !value)}>{editingOrder ? <MdCheck size={18} /> : <MdEdit size={17} />}</RowAction>}
       <RowAction label={`Change order: ${['YouTube Music','A–Z','Z–A','Custom'][sort]}`} disabled={editingOrder} onClick={changeOrder}><MdSort size={18} /></RowAction>
-      <RowAction label="Refresh library" disabled={loading || !!pending || editingOrder} onClick={() => void fetchPlaylists(true)}><MdRefresh size={18} /></RowAction></Focusable></div>
-    {!editingOrder && <MediaRow title="Search" subtitle="Find your next song" icon={<FaSearch size={20} style={{color:'#fff'}} />} onPlay={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-search'); }} />}
+      <RowAction label={t('library.refresh')} disabled={loading || !!pending || editingOrder} onClick={() => void fetchPlaylists(true)}><MdRefresh size={18} /></RowAction></Focusable></div>
+    {!editingOrder && <MediaRow title={t('library.search')} subtitle={t('library.searchHint')} icon={<FaSearch size={20} style={{color:'#fff'}} />} onPlay={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-search'); }} />}
     {error && <div role="alert" className="ytm-error">{error}</div>}
     {notice && <div role="status" className="ytm-collection-note">{notice}</div>}
-    {loading && <div className="ytm-empty">Loading your library…</div>}
-    {!loading && !error && !playlists.length && <div className="ytm-empty">Your playlists will appear here.</div>}
+    {loading && <div className="ytm-empty">{t('library.loading')}</div>}
+    {!loading && !error && !playlists.length && <div className="ytm-empty">{t('library.empty')}</div>}
     {orderedPlaylists.map(playlist => <MediaRow tintFocus key={playlist.playlistId}
       title={pending === playlist.playlistId ? 'Loading…' : playlist.title}
       subtitle={playlist.count == null ? 'Your favorite songs' : `${playlist.count} songs`}
       image={playlist.playlistId === 'LM' ? LIKED_SONGS_ART : playlist.thumbnail} icon={undefined}
-      editing={editingOrder} disabled={!!pending} onPlay={() => { if (!editingOrder) void act(playlist, 'play'); }}
+      editing={editingOrder} disabled={!!pending} onPlay={() => { if (!editingOrder) openPlaylist(playlist); }}
+      playDescription={t('library.open')} endIcon={<MdChevronRight size={20} />} focusRequest={libraryReturnPending() && selectedPlaylist()?.playlistId === playlist.playlistId ? returnRequest : undefined}
       actions={editingOrder ? <>
-        <RowAction label="Move playlist up" focusRequest={moveFocus.id === playlist.playlistId && moveFocus.direction === -1 ? moveFocus.sequence : undefined} disabled={orderedPlaylists[0]?.playlistId === playlist.playlistId} onClick={() => movePlaylist(playlist.playlistId,-1)}><MdArrowUpward size={18} /></RowAction>
-        <RowAction label="Move playlist down" focusRequest={moveFocus.id === playlist.playlistId && moveFocus.direction === 1 ? moveFocus.sequence : undefined} disabled={orderedPlaylists.at(-1)?.playlistId === playlist.playlistId} onClick={() => movePlaylist(playlist.playlistId,1)}><MdArrowDownward size={18} /></RowAction>
+        <RowAction label={t('library.moveUp')} focusRequest={moveFocus.id === playlist.playlistId && moveFocus.direction === -1 ? moveFocus.sequence : undefined} disabled={orderedPlaylists[0]?.playlistId === playlist.playlistId} onClick={() => movePlaylist(playlist.playlistId,-1)}><MdArrowUpward size={18} /></RowAction>
+        <RowAction label={t('library.moveDown')} focusRequest={moveFocus.id === playlist.playlistId && moveFocus.direction === 1 ? moveFocus.sequence : undefined} disabled={orderedPlaylists.at(-1)?.playlistId === playlist.playlistId} onClick={() => movePlaylist(playlist.playlistId,1)}><MdArrowDownward size={18} /></RowAction>
       </> : <>
-        <RowAction label="Shuffle playlist" disabled={!!pending} onClick={() => void act(playlist, 'shuffle')}><MdShuffle size={20} /></RowAction>
-        <RowAction label="Play playlist next" disabled={!!pending} onClick={() => void act(playlist, 'next')}><MdPlaylistPlay size={21} /></RowAction>
-        <RowAction label="Add playlist to queue" disabled={!!pending} onClick={() => void act(playlist, 'append')}><MdPlaylistAdd size={21} /></RowAction>
+        <RowAction label={t('library.play')} disabled={!!pending} onClick={() => void act(playlist, 'play')}><MdPlayArrow size={21} /></RowAction>
+        <RowAction label={t('library.shuffle')} disabled={!!pending} onClick={() => void act(playlist, 'shuffle')}><MdShuffle size={20} /></RowAction>
       </>} />)}
   </Focusable>;
 };

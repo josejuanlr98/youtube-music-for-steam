@@ -5,11 +5,13 @@ import { FaMusic } from 'react-icons/fa';
 import { focusLyricsReader } from '../services/focus';
 
 /** One card, with separated controls so focus never creates scalloped joins. */
-export function MediaRow({ title, subtitle, image, icon, actions, selected, disabled, onPlay, editing, tintFocus = true }: {
+export function MediaRow({ title, subtitle, image, icon, actions, selected, disabled, onPlay, editing, tintFocus = true, playDescription = 'Play', endIcon, focusRequest }: {
   title: string; subtitle?: string; image?: string | null; icon?: ReactNode;
   actions?: ReactNode; selected?: boolean; disabled?: boolean; onPlay: () => void; editing?: boolean; tintFocus?:boolean;
+  playDescription?:string; endIcon?:ReactNode; focusRequest?:number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const [sample, setSample] = useState(false);
   const [paletteStatus, setPaletteStatus] = useState<{ image:string; status:'ready'|'fallback' } | null>(null);
   useEffect(() => {
@@ -39,16 +41,18 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
     return () => { active = false; clearTimeout(timer); };
   }, [image, sample, tintFocus]);
   const paletteResolved = !tintFocus || !image || paletteStatus?.image === image;
+  useEffect(() => focusRequest && !disabled && paletteResolved ? focusLyricsReader(mainRef.current) : undefined, [focusRequest, disabled, paletteResolved]);
   const useTint = !tintFocus || !image || paletteStatus?.image === image && paletteStatus.status === 'ready';
   const accent = useArtworkAccent(useTint && tintFocus && sample ? image || undefined : undefined, ref);
   return <Focusable ref={ref} onFocusCapture={() => { if (tintFocus) setSample(true); }}
     style={{ '--ytm-row-accent':accent !== defaultAccent ? accent : '125,145,165', visibility:paletteResolved ? undefined : 'hidden' } as CSSProperties}
     className={`ytm-media-row${selected ? ' ytm-media-current' : ''}${tintFocus ? ' ytm-library-tint' : ''}`} flow-children="horizontal">
     {editing ? <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div><div className="ytm-media-subtitle">{subtitle}</div></div> :
-    <DialogButton className="ytm-button ytm-media-main" style={{ minWidth:0, width:0, flex:'1 1 0', padding:0, margin:0, display:'flex', alignItems:'center', gap:8, height:58, minHeight:58, border:0 }} disabled={disabled} onClick={onPlay} onOKActionDescription="Play">
+    <DialogButton ref={mainRef} className="ytm-button ytm-media-main" style={{ minWidth:0, width:0, flex:'1 1 0', padding:0, margin:0, display:'flex', alignItems:'center', gap:8, height:58, minHeight:58, border:0 }} disabled={disabled} onClick={onPlay} onOKActionDescription={playDescription}>
       <div className="ytm-media-art">{image ? <img src={image} alt="" loading="lazy" /> : icon || <FaMusic size={20} />}</div>
       <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div>
         {subtitle && <div className="ytm-media-subtitle">{subtitle}</div>}</div>
+      {endIcon && <span className="ytm-media-end-icon" aria-hidden="true">{endIcon}</span>}
     </DialogButton>}
     {actions && <div className="ytm-media-actions">{actions}</div>}
   </Focusable>;

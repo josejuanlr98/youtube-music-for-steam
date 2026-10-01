@@ -11,7 +11,8 @@ const modules = {
  'react':{useState:v=>[typeof v==='function'?v():v,()=>{}],useRef:()=>({current:null}),useEffect:fn=>effects.push(fn)},
  '@decky/ui':{Focusable:'div',DialogButton:'button',Navigation:{NavigateBack(){backs++},OpenQuickAccessMenu(){reopened++}},GamepadButton:{BUMPER_LEFT:5,BUMPER_RIGHT:6,DIR_UP:9,DIR_DOWN:10},QuickAccessTab:{Decky:1}},
  'react-icons/fa':{}, 'react-icons/md':{}, 'react-icons/si':{}, '../services/lyricsScroll':{}, '../services/syncedLyrics':{}, '../services/notifications':{},
- '../services/audioManager':{getIsCastConnected:()=>false, getCastSenderName:()=>null, addCastConnectionListener:()=>()=>{}, getCurrentTrack:()=>({videoId:'test',title:'Test'}),getProgress:()=>({position:45}),addProgressListener(){},addTrackChangeListener(){},playNext:async()=>{next++},playPrevious:async()=>{previous++},togglePlayback:()=>{toggled++}},
+ '../services/i18n':{useI18n:()=>({t:key=>key})},
+ '../services/audioManager':{getIsCastConnected:()=>false, getCastSenderName:()=>null, addCastConnectionListener:()=>()=>{}, getCurrentTrack:()=>({videoId:'test',title:'Test'}),getIsPlaying:()=>true,getProgress:()=>({position:45}),addProgressListener(){},addTrackChangeListener(){},addPlayStateListener(){return()=>{}},playNext:async()=>{next++},playPrevious:async()=>{previous++},togglePlayback:()=>{toggled++}},
  '../services/lyrics':{},'../services/focus':{},
  '../services/artworkPalette':{useArtworkPalette:()=> ['180,202,220','72,101,137','43,66,96']},'./ArtworkBackdrop':{ArtworkBackdrop:'backdrop'},
  './ThemeScope':{ThemeScope:'theme'},'./OverflowText':{OverflowText:'overflow-text'},'../services/lyricsSource':{lyricsSource:s=>s}
@@ -35,7 +36,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/components/LyricsPage
  assert.equal(nodes(root).some(n=>n.type==='button' && n.props.preferredFocus),false,'fullscreen has no Exit button');
  assert.equal(root.props.preferredFocus,true,'initial focus belongs to fullscreen controls');
  root.props.onOKButton(event(1)); assert.equal(toggled,2); assert.equal(backs,0,'A on initial focus pauses instead of exiting');
- const cleanup=effects[3]();
+ const cleanup=effects[5]();
  assert.equal(requests,1);
  cleanup(); assert.equal(unblocked,1);
  resolveLock({release:async()=>{released++}});

@@ -1,6 +1,7 @@
 /** Fullscreen reading motion, deliberately independent of song timing. */
-export function startLyricsScroll(element: HTMLElement) {
-  let pausedUntil = Date.now() + 2000;
+export function startLyricsScroll(element: HTMLElement, initialPauseMs = 2000) {
+  let pausedUntil = Date.now() + initialPauseMs;
+  let playing = true;
   let previous = Date.now();
   let position = element.scrollTop;
   let restartAt = 0;
@@ -8,7 +9,7 @@ export function startLyricsScroll(element: HTMLElement) {
     const now = Date.now();
     const elapsed = Math.min(100, now - previous);
     previous = now;
-    if (element.ownerDocument.visibilityState !== 'visible' || now < pausedUntil) {
+    if (!playing || element.ownerDocument.visibilityState !== 'visible' || now < pausedUntil) {
       position = element.scrollTop;
       return;
     }
@@ -30,6 +31,7 @@ export function startLyricsScroll(element: HTMLElement) {
   }, 50);
   return {
     pause() { restartAt = 0; pausedUntil = Date.now() + 3000; position = element.scrollTop; },
+    setPlaying(value: boolean) { playing = value; previous = Date.now(); position = element.scrollTop; },
     dispose() { clearInterval(timer); },
   };
 }

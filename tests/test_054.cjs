@@ -103,6 +103,7 @@ function lyricsTests() {
     'react-icons/md':{}, 'react-icons/si': { SiYoutubemusic:'icon' },
     '../services/lyricsScroll': {}, '../services/syncedLyrics': {},
     '../services/notifications': {},
+    '../services/i18n': { useI18n:() => ({ t:key => ({'lyrics.region':'Song lyrics','lyrics.loading':'Loading lyrics…','lyrics.title':'Lyrics','lyrics.fullscreen':'Fullscreen','common.retry':'Retry'}[key] || key) }) },
     '../services/artworkPalette': { useArtworkPalette:() => ['180,202,220','72,101,137','43,66,96'] },
     './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
     './ThemeScope': { ThemeScope:'theme' },

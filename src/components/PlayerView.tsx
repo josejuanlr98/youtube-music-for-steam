@@ -10,14 +10,16 @@ import { togglePlayback, playNext, playPrevious, stopAllPlayback, seekPlayback }
 import { VolumeSlider, PaddedSlider } from './VolumeSlider';
 import { LyricsPanel, LYRICS_ROUTE } from './LyricsPage';
 import { SiYoutubemusic } from 'react-icons/si';
-import { useArtworkAccent, defaultAccent } from '../services/artworkPalette';
+import { useArtworkPalette, defaultAccent } from '../services/artworkPalette';
 import { ThemeScope } from './ThemeScope';
 import { OverflowText, OverflowTextGroup } from './OverflowText';
+import { useI18n } from '../services/i18n';
 
 const button: React.CSSProperties = { flex:'1 1 0', width:0, minWidth:0, minHeight:28, maxHeight:34, height:30, borderRadius:8, boxSizing:'border-box', lineHeight:'normal', fontSize:12, padding:'0 8px', display:'flex', alignItems:'center', justifyContent:'center', gap:6, margin:0 };
 const formatTime = (value: number) => { const total = Math.max(0, Math.floor(value || 0)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`; };
 
 export const PlayerView = () => {
+  const { t } = useI18n();
   const { authenticated, authReady, castNetwork, track, isPlaying, shuffle, repeat, castConnected, castSenderName, position, duration, updateState } = usePlayer();
   const [rating, setRating] = useState('INDIFFERENT');
   const currentVideo = useRef(track?.videoId);
@@ -26,7 +28,7 @@ export const PlayerView = () => {
   const [error, setError] = useState('');
   const [showLyrics, setShowLyrics] = useState(false);
   const viewRef = useRef<HTMLDivElement>(null);
-  const accent = useArtworkAccent(track?.albumArt, viewRef);
+  const [accent, secondary, tertiary] = useArtworkPalette(track?.albumArt, viewRef);
   useEffect(() => {
     const element = viewRef.current;
     if (!element) return;
@@ -87,7 +89,7 @@ export const PlayerView = () => {
   return (
     <Focusable ref={viewRef} onSecondaryActionDescription={track && authenticated ? 'Fullscreen lyrics' : undefined}
       onSecondaryButton={track && authenticated ? event => { event.preventDefault(); event.stopPropagation(); Navigation.CloseSideMenus(); Navigation.Navigate(LYRICS_ROUTE); } : undefined}
-      className="ytm-ui ytm-player-view" style={{ '--ytm-cover-accent':accent, width:'100%', maxWidth:'100%', minWidth:0, minHeight:0, boxSizing:'border-box', padding:'2px 2px 6px', display:'flex', flexDirection:'column', gap:6 } as React.CSSProperties}>
+      className="ytm-ui ytm-player-view" style={{ '--ytm-cover-accent':accent, '--ytm-cover-secondary':secondary, '--ytm-cover-tertiary':tertiary, width:'100%', maxWidth:'100%', minWidth:0, minHeight:0, boxSizing:'border-box', padding:'2px 2px 6px', display:'flex', flexDirection:'column', gap:6 } as React.CSSProperties}>
       <ThemeScope />
       <div className="ytm-card" style={{ position:'relative', padding:'10px 34px 12px 10px', flexShrink:0, minWidth:0 }}>
           <SiYoutubemusic className="ytm-cover-logo" size={20} aria-label="YouTube Music" style={{ position:'absolute', right:10, top:10, color:`rgb(${accent})`, opacity:track?.albumArt && accent === defaultAccent ? 0 : 1, transition:'opacity 180ms ease' }} />
@@ -98,8 +100,8 @@ export const PlayerView = () => {
           {track?.albumArt ? <img src={track.albumArt} alt="Album art" style={{ width:'clamp(52px, 15vw, 64px)', height:'clamp(52px, 15vw, 64px)', borderRadius:4, objectFit:'cover', flexShrink:0 }} />
             : <div style={{ width:'clamp(52px, 15vw, 64px)', height:'clamp(52px, 15vw, 64px)', borderRadius:4, background:'#344052', display:'grid', placeItems:'center', flexShrink:0 }}><FaMusic size={28} /></div>}
           <OverflowTextGroup textKey={`${track?.title}|${track?.artist}`} style={{ minWidth:0, maxWidth:'calc(100% - 74px)', textAlign:'center' }}>
-            <div style={{ fontSize:15, fontWeight:700, lineHeight:1.3 }}><OverflowText text={track?.title ?? 'Nothing playing'} /></div>
-            <div className="ytm-muted" style={{ fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? 'Find a song in Library' : authReady ? 'Cast from your device' : '')} /></div>
+            <div style={{ fontSize:15, fontWeight:700, lineHeight:1.3 }}><OverflowText text={track?.title ?? t('player.nothing')} /></div>
+            <div className="ytm-muted" style={{ fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? t('player.find') : authReady ? 'Cast from your device' : '')} /></div>
           </OverflowTextGroup>
         </div>
       </div>
@@ -109,7 +111,7 @@ export const PlayerView = () => {
       </div>}
       {authReady && !authenticated && !castConnected && <>
         <div className="ytm-muted" style={{ fontSize:11, textAlign:'center' }}>{castNetwork.trusted ? 'On the same network, select this Deck from the Cast menu.' : 'Enable Cast on your trusted network in Settings.'}</div>
-        {!castNetwork.trusted && <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/cast'); }}>Set up Cast</DialogButton>}
+        {!castNetwork.trusted && <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/cast'); }}>{t('player.setupCast')}</DialogButton>}
       </>}
 
       <div style={{ margin:0, minWidth:0 }}>
@@ -118,25 +120,25 @@ export const PlayerView = () => {
       </div>
 
       <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, minWidth:0, flexShrink:0 }}>
-        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription="Previous" onClick={() => void run(playPrevious)}><IoPlaySkipBack size={19} /></DialogButton>
-        <DialogButton className="ytm-button" style={{ ...button, flex:1.35, height:34 }} disabled={!track || stopping} onOKActionDescription={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>{isPlaying ? <FaPause size={18} /> : <IoPlay size={22} />}</DialogButton>
-        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription="Next" onClick={() => void run(playNext)}><IoPlaySkipForward size={19} /></DialogButton>
+        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.previous')} onClick={() => void run(playPrevious)}><IoPlaySkipBack size={19} /></DialogButton>
+        <DialogButton className="ytm-button" style={{ ...button, flex:1.35, height:34 }} disabled={!track || stopping} onOKActionDescription={isPlaying ? t('player.pause') : t('player.play')} onClick={togglePlayback}>{isPlaying ? <FaPause size={18} /> : <IoPlay size={22} />}</DialogButton>
+        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.next')} onClick={() => void run(playNext)}><IoPlaySkipForward size={19} /></DialogButton>
       </Focusable>
 
       <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, minWidth:0, flexShrink:0 }}>
-        <DialogButton className={`ytm-button ytm-rating-button ${rating === 'LIKE' ? 'ytm-selected' : ''}`} style={button} disabled={!track || !authenticated} onOKActionDescription="Like" onClick={() => void run(() => rate('LIKE'))}>{rating === 'LIKE' ? <AiFillLike size={18} /> : <AiOutlineLike size={18} />}</DialogButton>
-        <DialogButton className={`ytm-button ytm-rating-button ${rating === 'DISLIKE' ? 'ytm-selected' : ''}`} style={button} disabled={!track || !authenticated} onOKActionDescription="Dislike" onClick={() => void run(() => rate('DISLIKE'))}>{rating === 'DISLIKE' ? <AiFillDislike size={18} /> : <AiOutlineDislike size={18} />}</DialogButton>
-        <DialogButton className="ytm-button" style={{ ...button, flex:1.6 }} disabled={!track || !authenticated} onClick={() => setShowLyrics(true)}><FaAlignLeft size={14} /> Lyrics</DialogButton>
+        <DialogButton className={`ytm-button ytm-rating-button ${rating === 'LIKE' ? 'ytm-selected' : ''}`} style={button} disabled={!track || !authenticated} onOKActionDescription={t('player.like')} onClick={() => void run(() => rate('LIKE'))}>{rating === 'LIKE' ? <AiFillLike size={18} /> : <AiOutlineLike size={18} />}</DialogButton>
+        <DialogButton className={`ytm-button ytm-rating-button ${rating === 'DISLIKE' ? 'ytm-selected' : ''}`} style={button} disabled={!track || !authenticated} onOKActionDescription={t('player.dislike')} onClick={() => void run(() => rate('DISLIKE'))}>{rating === 'DISLIKE' ? <AiFillDislike size={18} /> : <AiOutlineDislike size={18} />}</DialogButton>
+        <DialogButton className="ytm-button" style={{ ...button, flex:1.6 }} disabled={!track || !authenticated} onClick={() => setShowLyrics(true)}><FaAlignLeft size={14} /> {t('player.lyrics')}</DialogButton>
       </Focusable>
 
       <div style={{ margin:0, minWidth:0 }}><VolumeSlider /></div>
 
       <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, minWidth:0, flexShrink:0 }}>
-        <DialogButton className={`ytm-button ${shuffle ? 'ytm-selected' : ''}`} style={{ ...button, fontSize:11 }} disabled={castConnected || !authenticated} onClick={() => void run(async () => { const result = await call<[], { shuffle: boolean }>('toggle_shuffle'); updateState({ shuffle:result.shuffle }); })}><MdShuffle size={18} /> Shuffle {shuffle ? 'On' : 'Off'}</DialogButton>
-        <DialogButton className={`ytm-button ${repeat !== 'NONE' ? 'ytm-selected' : ''}`} style={{ ...button, fontSize:11 }} disabled={castConnected || !authenticated} onClick={() => void run(async () => { const result = await call<[], { repeat:'NONE' | 'ALL' | 'ONE' }>('toggle_repeat'); updateState({ repeat:result.repeat }); })}>{repeat === 'ONE' ? <MdRepeatOne size={17} /> : <MdRepeat size={17} />} Repeat {repeat === 'NONE' ? 'Off' : repeat === 'ONE' ? 'One' : 'All'}</DialogButton>
+        <DialogButton className={`ytm-button ${shuffle ? 'ytm-selected' : ''}`} style={{ ...button, fontSize:11 }} disabled={castConnected || !authenticated} onClick={() => void run(async () => { const result = await call<[], { shuffle: boolean }>('toggle_shuffle'); updateState({ shuffle:result.shuffle }); })}><MdShuffle size={18} /> {t('player.shuffle')} {shuffle ? t('common.on') : t('common.off')}</DialogButton>
+        <DialogButton className={`ytm-button ${repeat !== 'NONE' ? 'ytm-selected' : ''}`} style={{ ...button, fontSize:11 }} disabled={castConnected || !authenticated} onClick={() => void run(async () => { const result = await call<[], { repeat:'NONE' | 'ALL' | 'ONE' }>('toggle_repeat'); updateState({ repeat:result.repeat }); })}>{repeat === 'ONE' ? <MdRepeatOne size={17} /> : <MdRepeat size={17} />} {t('player.repeat')} {repeat === 'NONE' ? t('common.off') : repeat === 'ONE' ? t('player.one') : t('player.all')}</DialogButton>
       </Focusable>
-      {castConnected && <div className="ytm-muted" style={{ fontSize:10, textAlign:'center' }}>Shuffle / repeat: use your device.</div>}
-      <DialogButton className="ytm-button ytm-stop" aria-label="Stop playback, clear queue and unlink Cast" style={{ ...button, flex:'none', width:'100%', fontSize:11 }} disabled={stopping} onClick={() => void stop()}><FaStop size={10} /> {stopping ? 'Stopping…' : 'Stop'}</DialogButton>
+      {castConnected && <div className="ytm-muted" style={{ fontSize:10, textAlign:'center' }}>{t('player.deviceShuffle')}</div>}
+      <DialogButton className="ytm-button ytm-stop" aria-label={t('player.stopHint')} style={{ ...button, flex:'none', width:'100%', fontSize:11 }} disabled={stopping} onClick={() => void stop()}><FaStop size={10} /> {stopping ? t('player.stopping') : t('player.stop')}</DialogButton>
       {error && <div className="ytm-error" role="alert">{error}</div>}
     </Focusable>
   );

@@ -20,6 +20,7 @@ SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 CAST_SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "cast-settings.json")
 logger = logging.getLogger("YouTubeMusic")
 
+
 # Integrated Cast Receiver backend
 PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
 NODE_BIN_SRC = os.path.join(PLUGIN_DIR, "bin", "node")
@@ -393,6 +394,24 @@ class Plugin:
         except Exception as error:
             decky.logger.warning(f'Firefox import failed: {type(error).__name__}')
             return {'error': 'Could not import Firefox. Close Firefox after signing in and retry. Your saved session has been kept.'}
+
+    async def import_browser_session(self):
+        self._auth_generation += 1
+        generation = self._auth_generation
+        user_home = getattr(decky, 'DECKY_USER_HOME', '/home/deck')
+        try:
+            from ytm_firefox import read_firefox_headers
+            parsed = await asyncio.to_thread(read_firefox_headers, user_home)
+            source = 'Firefox-family browser'
+            result = await self._install_browser_auth(parsed, generation)
+            if result.get('success'):
+                result['browser'] = source
+            return result
+        except ValueError as error:
+            return {'error': str(error)}
+        except Exception as error:
+            decky.logger.warning(f'Browser import failed: {type(error).__name__}')
+            return {'error': 'Could not import a browser session. Close the browser after signing in and retry. Your saved session has been kept.'}
 
     async def _install_browser_auth(self, parsed, generation):
         try:
@@ -1153,6 +1172,10 @@ class Plugin:
             self._lyrics_resolver = LyricsResolver()
         # Network calls run off Decky's event loop, on an isolated anonymous client.
         return await asyncio.to_thread(self._lyrics_resolver.resolve, video_id, metadata)
+
+    async def translate_lyrics(self, lyrics, target):
+        from ytm_translation import translate_lyrics
+        return await asyncio.to_thread(translate_lyrics, lyrics, target)
 
     async def stop_all(self):
         self._queue_load_error = ''

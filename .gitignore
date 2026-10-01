@@ -69,9 +69,13 @@ design/
 py_modules/*
 !py_modules/ytm_lyrics.py
 !py_modules/ytm_firefox.py
+!py_modules/ytm_translation.py
 
 # Linux runtime binaries are downloaded by build.ps1 and shipped in Releases.
 bin/
 
 # Build artifact
 youtube-music.zip
+youtube-music-for-steam.zip
+youtube-music-unified.zip
+outputs/

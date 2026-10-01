@@ -6,8 +6,10 @@ import { MdPlaylistPlay, MdPlaylistAdd } from 'react-icons/md';
 import { playTrack, getIsCastConnected, castRequest, type TrackInfo } from '../services/audioManager';
 import { ThemeScope } from './ThemeScope';
 import { MediaRow, RowAction } from './MediaRow';
+import { useI18n } from '../services/i18n';
 interface SearchResult { videoId: string; title: string; artist: string; albumArt: string; duration: string }
 export const SearchPage = () => {
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -55,27 +57,27 @@ export const SearchPage = () => {
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Could not complete this action.'); }
     finally { busy.current = false; if (alive.current) setLoadingSong(null); }
   };
-  return <Focusable flow-children="vertical" className="ytm-ui ytm-search-page" onCancelButton={() => Navigation.NavigateBack()} onCancelActionDescription="Back">
+  return <Focusable flow-children="vertical" className="ytm-ui ytm-search-page" onCancelButton={() => Navigation.NavigateBack()} onCancelActionDescription={t('common.back')}>
     <ThemeScope />
     <Focusable flow-children="vertical" className="ytm-search-content">
-      <div className="ytm-search-header"><div><div className="ytm-eyebrow">Your music</div><h2>Find your next song</h2></div>
-        <DialogButton className="ytm-button" onClick={() => Navigation.NavigateBack()}><FaArrowLeft /> Back</DialogButton></div>
+      <div className="ytm-search-header"><div><div className="ytm-eyebrow">{t('search.eyebrow')}</div><h2>{t('search.title')}</h2></div>
+        <DialogButton className="ytm-button" onClick={() => Navigation.NavigateBack()}><FaArrowLeft /> {t('search.back')}</DialogButton></div>
       <Focusable flow-children="horizontal" className="ytm-search-form">
         <div className="ytm-search-input"><TextField value={query} onChange={e => setQuery(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSearch(); } }} /></div>
-        <DialogButton className="ytm-button" disabled={searching || !query.trim()} onClick={() => void handleSearch()}><FaSearch style={{color:'#fff'}} /> {searching ? 'Searching…' : 'Search'}</DialogButton>
+        <DialogButton className="ytm-button" disabled={searching || !query.trim()} onClick={() => void handleSearch()}><FaSearch style={{color:'#fff'}} /> {searching ? t('common.loading') : t('search.button')}</DialogButton>
       </Focusable>
       {error && <div role="alert" className="ytm-error">{error}</div>}
       {queued && <div role="status" className="ytm-collection-note">{queued}</div>}
       <Focusable flow-children="vertical" className="ytm-search-results">
-        {!hasSearched && <div className="ytm-empty">Search by song or artist.</div>}
-        {hasSearched && !searching && !results.length && !error && <div className="ytm-empty">No songs found. Try another title or artist.</div>}
+        {!hasSearched && <div className="ytm-empty">{t('search.hint')}</div>}
+        {hasSearched && !searching && !results.length && !error && <div className="ytm-empty">{t('search.empty')}</div>}
         {results.map((song, index) => <MediaRow key={`${song.videoId}-${index}`} image={song.albumArt}
-          title={loadingSong === song.videoId ? 'Loading…' : song.title} subtitle={song.artist}
+          title={loadingSong === song.videoId ? t('common.loading') : song.title} subtitle={song.artist}
           disabled={!!loadingSong} onPlay={() => void act(song, 'play')} actions={<>
             <span className="ytm-track-duration">{song.duration}</span>
-            <RowAction label="Play next" disabled={!!loadingSong} onClick={() => void act(song, 'next')}><MdPlaylistPlay size={22} /></RowAction>
-            <RowAction label="Add to queue" disabled={!!loadingSong} onClick={() => void act(song, 'append')}><MdPlaylistAdd size={22} /></RowAction>
+            <RowAction label={t('playlist.playNext')} disabled={!!loadingSong} onClick={() => void act(song, 'next')}><MdPlaylistPlay size={22} /></RowAction>
+            <RowAction label={t('playlist.addQueue')} disabled={!!loadingSong} onClick={() => void act(song, 'append')}><MdPlaylistAdd size={22} /></RowAction>
           </>} />)}
       </Focusable>
     </Focusable>

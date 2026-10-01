@@ -3,7 +3,9 @@ const api = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/artworkPalette.ts','utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText, {
   exports:api, require:()=>({}), Uint8ClampedArray, URL,
 });
-assert.equal(api.extractAccent(new Uint8ClampedArray([0,0,0,255,255,255,255,255])),api.defaultAccent);
+const grayscale = api.extractAccent(new Uint8ClampedArray([0,0,0,255,255,255,255,255]));
+assert.notEqual(grayscale,api.defaultAccent);
+assert.equal(new Set(grayscale.split(',').map(Number)).size,1,'black and white artwork remains achromatic');
 assert.equal(api.extractAccent(new Uint8ClampedArray([255,0,0,0])),api.defaultAccent);
 const pixels = new Uint8ClampedArray([180,40,30,255,185,45,31,255,40,40,180,255]);
 const [r,g,b] = api.extractAccent(pixels).split(',').map(Number);
@@ -42,3 +44,9 @@ assert.equal(multicolor.length,3);assert.equal(new Set(multicolor).size,3,'disti
 const monochrome = api.extractPalette(new Uint8ClampedArray([190,60,30,255]));
 assert.equal(monochrome.length,3);
 for (const color of monochrome) { const [r,g,b]=color.split(',').map(Number);assert(r>g&&g>b,'fallback shades preserve the cover hue'); }
+
+const paletteSource = fs.readFileSync('src/services/artworkPalette.ts','utf8');
+assert.doesNotMatch(paletteSource,/cache\.get\(url\) \|\| previous\.palette/,'a new song never renders the previous cover palette');
+assert.doesNotMatch(paletteSource,/cache\.get\(url\) \|\| value\.palette/,'render-time URL changes use the neutral palette immediately');
+assert.match(paletteSource,/cache\.get\(url\) \|\| defaultPalette/,'uncached artwork uses the intentional Nothing-playing palette');
+console.log('PASS palette transitions cannot leak the previous song color');

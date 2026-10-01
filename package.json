@@ -1,15 +1,16 @@
 {
   "name": "decky-youtube-music-cast",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "YouTube Music player and Cast receiver for SteamOS handhelds and PCs.",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "test": "node tests/test_cast_lifecycle.cjs && node tests/test_054.cjs && node tests/test_notifications.cjs && node tests/test_cast_only.cjs && node tests/test_cast_transport.cjs && node tests/test_fullscreen.cjs && node tests/test_lyrics_scroll.cjs && node tests/test_synced_lyrics.cjs && node tests/test_artwork_palette.cjs && node tests/test_view_theme.cjs && node tests/test_artwork_motion.cjs",
+    "test": "node tests/test_cast_lifecycle.cjs && node tests/test_054.cjs && node tests/test_notifications.cjs && node tests/test_cast_only.cjs && node tests/test_cast_transport.cjs && node tests/test_fullscreen.cjs && node tests/test_lyrics_scroll.cjs && node tests/test_synced_lyrics.cjs && node tests/test_artwork_palette.cjs && node tests/test_view_theme.cjs && node tests/test_artwork_motion.cjs && node tests/test_playlist_detail.cjs",
     "test:python": "python -m unittest discover -s tests -v",
     "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --outfile=backend/out/server.cjs --external:bufferutil --external:utf-8-validate",
-    "package": "powershell -ExecutionPolicy Bypass -File build.ps1"
+    "package": "powershell -ExecutionPolicy Bypass -File build.ps1",
+    "package:source": "python scripts/package_source.py --source . --output outputs/youtube-music-for-steam-0.6.9-source.zip --version 0.6.9"
   },
   "keywords": [
     "decky",
@@ -22,13 +23,14 @@
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",
+    "@types/node": "^20.11.0",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
-    "rollup": "^4.53.3",
-    "typescript": "^5.6.2",
-    "@types/node": "^20.11.0",
+    "@types/react-router": "5.1.20",
     "@types/ws": "^8.5.10",
     "esbuild": "^0.20.0",
+    "rollup": "^4.53.3",
+    "typescript": "^5.6.2",
     "vitest": "^1.2.0"
   },
   "dependencies": {

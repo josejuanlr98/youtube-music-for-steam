@@ -1,2 +1,3 @@
 # Vendored by build.ps1 into py_modules/ for the Decky runtime.
 ytmusicapi==1.11.5
+langdetect==1.0.9

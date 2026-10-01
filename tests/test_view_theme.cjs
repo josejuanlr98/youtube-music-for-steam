@@ -10,6 +10,8 @@ assert.equal(lyricsSource('Source: '),'');assert.equal(lyricsSource(null),'');as
 const {attachViewTheme}=load('src/components/ThemeScope.tsx',{'../theme':{themeCss:'test theme'}});
 const {themeCss}=load('src/theme.ts');
 assert.match(themeCss,/ytm-rating-button:focus[^}]*outline:none/);
+assert.match(themeCss,/ytm-rating-button \{[^}]*border-color:rgba\(var\(--ytm-cover-accent\),\.25\)/,'rating controls share the player accent border');
+assert.match(themeCss,/ytm-lyrics-view:not\(\.ytm-immersive\) \.ytm-reader \{[^}]*border:0 !important/,'compact lyrics has no nested bubble outline');
 assert.match(themeCss,/ytm-compact-slider \.gpfocus[^}]*border-radius:8px/);
 const makeDoc=()=>{const nodes=[];return {nodes,head:{appendChild:s=>nodes.push(s)},createElement:()=>({dataset:{},style:{setProperty(...args){assert.deepEqual(args,['display','none','important'])}},remove(){nodes.splice(nodes.indexOf(this),1)}})}};
 const a=makeDoc(),b=makeDoc();const releaseA=attachViewTheme(a),releaseA2=attachViewTheme(a),releaseB=attachViewTheme(b);

@@ -24,7 +24,7 @@ export const PaddedSlider = (props: SliderFieldProps) => {
     });
   }, []);
   return <div ref={ref} className="ytm-compact-slider" style={{ width:'100%', minWidth:0, maxWidth:'100%', borderRadius:8 }}>
-    <style>{`.ytm-compact-slider .${gamepadSliderClasses?.SliderTrack} { --left-track-color:rgb(var(--ytm-cover-accent,180,202,220)) !important; --colored-toggles-main-color:rgb(var(--ytm-cover-accent,180,202,220)) !important; }`}</style>
+    <style>{`.ytm-compact-slider .${gamepadSliderClasses?.SliderTrack} { --left-track-color:rgb(var(--ytm-cover-accent,78,108,132)) !important; --colored-toggles-main-color:rgb(var(--ytm-cover-accent,78,108,132)) !important; }`}</style>
     <SliderField {...props} />
   </div>;
 };

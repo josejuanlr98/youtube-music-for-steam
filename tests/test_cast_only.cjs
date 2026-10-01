@@ -13,11 +13,15 @@ const modules = {
   '@decky/ui': { DialogButton:'button', Focusable:'focusable', Navigation:{} },
   '../context/PlayerContext': { usePlayer:() => state },
   '../services/audioManager': {},
+  '../services/playlistActions': { performPlaylistAction:async()=>({started:false,added:0,cast:false}) },
+  '../services/playlistNavigation': { PLAYLIST_ROUTE:'/youtube-music-playlist', LIBRARY_RETURN_EVENT:'ytm-return-library', selectPlaylist(){}, consumeLibraryReturn:()=>null, libraryReturnPending:()=>false, selectedPlaylist:()=>null },
   './Section': { Section:'section' },
   './MediaRow': { MediaRow:'row', RowAction:'action' },
   './VolumeSlider': { VolumeSlider:'volume', PaddedSlider:'slider' },
   './LyricsPage': { LyricsPanel:'lyrics' },
-  '../services/artworkPalette': { useArtworkAccent:() => '180,202,220' },
+  '../services/artworkPalette': { useArtworkPalette:() => ['180,202,220','72,101,137','43,66,96'], defaultAccent:'180, 202, 220' },
+  '../services/uiPreferences': { getLastCoverAccent:() => '88,68,82' },
+  '../services/i18n': { useI18n:() => ({ t:key => ({'player.lyrics':'Lyrics','common.previous':'Previous','player.play':'Play','player.pause':'Pause','common.next':'Next','player.like':'Like','player.dislike':'Dislike'}[key] || key) }) },
   './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
   './ThemeScope': { ThemeScope:'theme' },
   './OverflowText': { OverflowText:'overflow-text' },
@@ -51,7 +55,7 @@ const { PlayerView } = load('PlayerView.tsx');
   for (const action of ['Like', 'Dislike']) {
     assert.equal(guestPlayer.find(n => n.props?.onOKActionDescription === action).props.disabled, true);
   }
-  assert.equal(guestPlayer.find(n => n.props?.children?.includes?.(' Lyrics')).props.disabled, true);
+  assert.equal(guestPlayer.find(n => (JSON.stringify(n.props?.children) || '').includes('Lyrics') && typeof n.props?.disabled === 'boolean').props.disabled, true);
   state = { ...state, authenticated:true, authReady:true };
   effects = []; calls = [];
   const accountLibrary = LibraryView({});

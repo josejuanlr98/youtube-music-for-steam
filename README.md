@@ -10,36 +10,40 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 
 | Player | Casting from your phone |
 | --- | --- |
-| ![Player](screenshots/player.jpg) | ![Casting](screenshots/player-casting.jpg) |
+| ![Player](screenshots/player-069.jpg) | ![Casting](screenshots/player-casting-069.jpg) |
 
 | Library | Queue |
 | --- | --- |
-| ![Library](screenshots/library.jpg) | ![Queue](screenshots/queue.jpg) |
+| ![Library](screenshots/library-069.jpg) | ![Queue](screenshots/queue-069.jpg) |
 
-| Search | Lyrics in Quick Access |
+| Open playlist | Lyrics in Quick Access |
 | --- | --- |
-| ![Search](screenshots/search.jpg) | ![Lyrics tab](screenshots/lyrics-tab.jpg) |
+| ![Playlist detail](screenshots/playlist-detail-069.jpg) | ![Lyrics tab](screenshots/player-lyrics-069.jpg) |
 
-| Fullscreen lyrics | Import your session from Firefox |
+| Fullscreen lyrics | Translated lyrics |
 | --- | --- |
-| ![Fullscreen lyrics](screenshots/fullscreen-lyrics.jpg) | ![Firefox session import](screenshots/firefox-cookie-import.jpg) |
+| ![Fullscreen lyrics](screenshots/lyrics-fullscreen-069.jpg) | ![Translated lyrics](screenshots/lyrics-translated-069.jpg) |
+
+| Cast lyrics fullscreen | Language settings | Cookie import |
+| --- | --- | --- |
+| ![Cast lyrics fullscreen](screenshots/lyrics-cast-fullscreen-069.jpg) | ![Language settings](screenshots/language-settings-069.jpg) | ![Cookie import](screenshots/cookie-import-069.jpg) |
 
 ## What it can do
 
 - **Listen from Quick Access:** search and play tracks, browse your YouTube Music library, and control playback with the Steam Deck controls.
 - **Start big playlists sooner:** playback can begin from the first playable batch while the rest of the playlist loads in the background. The queue fills as loading continues.
-- **Manage music your way:** play a playlist, shuffle it, play it next, or add it to the queue. Reorder the queue and set your library to A–Z, Z–A, or a custom order.
+- **Manage music your way:** open playlists to browse and queue individual songs, or play, shuffle, play next, and add the whole playlist. Reorder the queue and set your library to A–Z, Z–A, or a custom order.
 - **Cast to your Steam system:** receive YouTube and YouTube Music Cast sessions from a phone or another device on your trusted network. Playback state, track changes, and supported controls stay in sync with the sender.
-- **Import your account from Firefox:** in Desktop Mode, sign in to YouTube Music in Firefox and use the plugin's **Import from Firefox** button. The plugin saves the session locally; it never asks for your Google password.
-- **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored lava-lamp backdrop, and requests temporary screen-awake protection while lyrics are open.
-- **Keep the experience cohesive:** artwork colors inform the player, library, and lyrics; track and Cast notifications use Steam's native notification system.
+- **Import your account from Firefox-family browsers:** in Desktop Mode, sign in to YouTube Music in Firefox, Zen, LibreWolf, Waterfox, or Floorp, then use **Import cookies**. Manual request-header import is available for other browsers. The plugin saves the session locally; it never asks for your Google password.
+- **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored backdrop, and requests temporary screen-awake protection while lyrics are open. Optional lyric translation uses a separate language selector and preserves the original lines.
+- **Keep the experience cohesive:** artwork colors inform the player, library, and lyrics; track and Cast notifications use Steam's native notification system. Manually selected local songs stay quiet; automatic track changes can notify you.
 - **Stop cleanly:** Stop ends the Cast session and clears the active queue.
 
 ## Install
 
 Download the latest installable ZIP from [Releases](https://github.com/josejuanlr98/youtube-music-for-steam/releases/latest). In Gaming Mode, open **Decky → Developer Options → Install from ZIP**, select the file, then restart Decky if needed. The `-source` ZIP is for developers and is not the normal installer.
 
-Cast works without signing into the plugin. To use account features such as Library, Search, likes, and lyrics, open **Settings → Account** and import a YouTube Music session from Firefox. Firefox must be installed on the SteamOS device, opened in Desktop Mode, and signed into YouTube Music first.
+Cast works without signing into the plugin. To use account features such as Library, Search, likes, and lyrics, open **Settings → Account** and import a YouTube Music session from a supported Firefox-family browser. The browser must be installed on the SteamOS device, opened in Desktop Mode, and signed into YouTube Music first.
 
 ## Cast setup
 
@@ -52,6 +56,8 @@ The sender's queue is the initial source during Cast. The plugin keeps the queue
 Open Lyrics and press **X** for fullscreen; press **B** to return. When timed lyrics are available, the current line follows playback and seeking. Otherwise, fullscreen uses a gentle reading scroll. Manual scrolling pauses automatic following briefly. The view asks Steam for temporary wake protection and releases it on exit; availability depends on Steam/CEF.
 
 Lyrics are loaded on demand and cached for a small number of recent tracks. LRCLIB may provide a timing fallback when its song and artist match. Lyrics availability and timing depend on the providers and version of the recording.
+
+Lyric translation is off by default. Enable it in **Settings → Language** and select a target language. Lyric text, without cookies or account data, is sent to MyMemory on demand. Its free daily quota is external to this plugin; when it is exhausted or unavailable, the original lyrics remain visible and the reader explains the problem. Successful translations are cached during the plugin session.
 
 ## Privacy and account sessions
 

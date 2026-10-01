@@ -100,9 +100,9 @@ function applyVolume(value:number, muted = false) {
 }
 
 let trackChangeListeners: Array<(track: TrackInfo | null) => void> = [];
-let playbackStartedListeners: Array<(track: TrackInfo) => void> = [];
+let playbackStartedListeners: Array<(track: TrackInfo, manual: boolean) => void> = [];
 let senderConnectedListeners: Array<(name: string | null, avatar?:string) => void> = [];
-export function addPlaybackStartedListener(fn: (track: TrackInfo) => void) {
+export function addPlaybackStartedListener(fn: (track: TrackInfo, manual: boolean) => void) {
   playbackStartedListeners.push(fn);
   return () => { playbackStartedListeners = playbackStartedListeners.filter(l => l !== fn); };
 }
@@ -129,6 +129,10 @@ export function getIsCastConnected() { return castConnected; }
 export function getNetworkInfo() { return castNetwork; }
 export function getCastSenderName() { return castSenderName; }
 export function getProgress() { return { position: progressPosition, duration: progressDuration }; }
+export function getLivePlaybackPosition() {
+  const current = audioElement?.currentTime;
+  return playbackSource && Number.isFinite(current) ? Math.max(0, current!) : progressPosition;
+}
 
 export function addTrackChangeListener(fn: (track: TrackInfo | null) => void) {
   trackChangeListeners.push(fn);
@@ -165,10 +169,10 @@ function notifyTrack(track: TrackInfo | null) {
   currentTrack = track;
   trackChangeListeners.forEach((fn) => fn(track));
 }
-function notifyPlaying(value: boolean) {
+function notifyPlaying(value: boolean, manual = false) {
   isPlaying = value;
   playStateListeners.forEach((fn) => fn(value));
-  if (value && currentTrack) playbackStartedListeners.forEach(fn => fn(currentTrack!));
+  if (value && currentTrack) playbackStartedListeners.forEach(fn => fn(currentTrack!, manual));
 }
 function notifyCastConnection(value: boolean) {
   if (!value) {
@@ -500,7 +504,7 @@ async function handleLocalError() {
   finally { retryInFlight = false; }
 }
 
-async function loadAndPlay(track: TrackInfo, retry = false) {
+async function loadAndPlay(track: TrackInfo, retry = false, manual = false) {
   if (stoppingAll || !audioElement || !track.url) return;
   if (!retry) localRetryId = null;
   const generation = ++playbackGeneration;
@@ -518,7 +522,7 @@ async function loadAndPlay(track: TrackInfo, retry = false) {
       deadline = setTimeout(() => reject(new Error('Audio did not start within 20 seconds')), 20000);
     })]);
     if (generation !== playbackGeneration) return;
-    notifyPlaying(true);
+    notifyPlaying(true, manual);
     void call('resume');
   } catch (e) {
     if (generation !== playbackGeneration) return;
@@ -585,7 +589,7 @@ export async function playTrack(track: TrackInfo) {
     const restored = await call<[unknown], {success?:boolean;error?:string}>('restore_local_queue', snapshot);
     if (!restored.success) throw new Error(restored.error || 'Could not restore your playlist.');
   }
-  await loadAndPlay(track);
+  await loadAndPlay(track, false, true);
 }
 export function pausePlayback() {
   if (usesCast()) {
