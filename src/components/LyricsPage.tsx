@@ -1,3 +1,4 @@
+import { translationColor } from '../services/lyricColor';
 import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab } from '@decky/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaExpand } from 'react-icons/fa';
@@ -5,7 +6,7 @@ import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, get
 import { loadLyrics, loadTranslatedLyrics, type LyricsResult } from '../services/lyrics';
 import { focusLyricsReader } from '../services/focus';
 
-import { MdCastConnected } from 'react-icons/md';
+import { MdCastConnected, MdTranslate } from 'react-icons/md';
 import { SiYoutubemusic } from 'react-icons/si';
 import { followSyncedLyrics } from '../services/syncedLyrics';
 import { startLyricsScroll } from '../services/lyricsScroll';
@@ -16,6 +17,7 @@ import { ArtworkBackdrop } from './ArtworkBackdrop';
 import { ThemeScope } from './ThemeScope';
 import { OverflowText, OverflowTextGroup } from './OverflowText';
 import { lyricsSource } from '../services/lyricsSource';
+import { createReaderScroller } from '../services/readerScroll';
 
 export const LYRICS_ROUTE = '/youtube-music-lyrics';
 
@@ -36,13 +38,20 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   const [result, setResult] = useState<LyricsResult>({});
   const [translatedLines, setTranslatedLines] = useState<string[] | null>(null);
   const [translationError, setTranslationError] = useState('');
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationAttempt, setTranslationAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const manualScroll = useRef<ReturnType<typeof createReaderScroller> | null>(null);
+  useEffect(() => {
+    if (scrollRef.current) manualScroll.current=createReaderScroller(scrollRef.current);
+    return () => { manualScroll.current?.dispose(); manualScroll.current=null; };
+  }, [track?.videoId, loading, result.lyrics]);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeLine, setActiveLine] = useState(-1);
-  const autoScroll = useRef<{ pause():void; dispose():void; setPlaying?(value:boolean):void } | null>(null);
+  const autoScroll = useRef<{ pause():boolean|void; dispose():void; setPlaying?(value:boolean):void } | null>(null);
   useEffect(() => focusLyricsReader(fullScreen ? rootRef.current : scrollRef.current), [fullScreen]);
   useEffect(() => addTrackChangeListener(setTrack), []);
   useEffect(() => addPlayStateListener(setPlaying), []);
@@ -65,14 +74,17 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     let alive = true;
     setTranslatedLines(null);
     setTranslationError('');
+    setTranslationLoading(false);
     if (translateLyrics && result.lyrics) {
       const text = result.timedLines?.length ? result.timedLines.map(line => line.text).join('\n') : result.lyrics;
+      setTranslationLoading(true);
       void loadTranslatedLyrics(text, resolvedTranslationLanguage)
-        .then(lines => { if (alive) setTranslatedLines(lines); })
-        .catch(error => { if (alive) setTranslationError(error instanceof Error ? error.message : 'Translation is temporarily unavailable'); });
+        .then(value => { if (alive) { setTranslatedLines(value.translatedLines || null); setTranslationError(value.error || ''); } })
+        .catch(() => { if (alive) setTranslationError('Translation is temporarily unavailable'); })
+        .finally(() => { if (alive) setTranslationLoading(false); });
     }
     return () => { alive = false; };
-  }, [translateLyrics, resolvedTranslationLanguage, result.lyrics, result.timedLines]);
+  }, [translateLyrics, resolvedTranslationLanguage, result.lyrics, result.timedLines, translationAttempt]);
 
   // Deck exposes this store in SteamOS. BlockSuspendAction prevents the Deck
   // from suspending while the dedicated reader is open; the browser wake lock
@@ -115,24 +127,29 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   useEffect(() => {
     if (loading || !result.lyrics || !scrollRef.current) return;
     const lines = result.timedLines;
+    const move=(top:number,instant:boolean)=>{
+      if(manualScroll.current)manualScroll.current.scrollTo(top,instant);
+      else scrollRef.current?.scrollTo({top,behavior:instant?'auto':'smooth'});
+    };
     const motion = lines?.length
       ? followSyncedLyrics(scrollRef.current, lines, getLivePlaybackPosition, listener => {
           const unsubscribe = addProgressListener(listener);
           const timer = window.setInterval(() => listener(getLivePlaybackPosition()), 100);
           return () => { unsubscribe(); window.clearInterval(timer); };
-        }, setActiveLine)
-      : fullScreen ? startLyricsScroll(scrollRef.current, translatedLines ? 0 : 2000) : null;
+        }, setActiveLine, move)
+      : fullScreen ? startLyricsScroll(scrollRef.current, 2000, move) : null;
     if (!motion) return;
     if (!lines?.length) (motion as { setPlaying?(value:boolean):void }).setPlaying?.(playing);
     autoScroll.current = motion;
     return () => { motion.dispose(); autoScroll.current = null; };
-  }, [fullScreen, loading, result.lyrics, result.timedLines, translatedLines, track?.videoId]);
+  }, [fullScreen, loading, result.lyrics, result.timedLines, track?.videoId]);
   useEffect(() => {
     if (!result.timedLines?.length) autoScroll.current?.setPlaying?.(playing);
   }, [playing, result.timedLines]);
   const centered = fullScreen && (!track || (!loading && !result.lyrics && !result.error));
   const source = lyricsSource(result.source);
-  const pauseMotion = () => autoScroll.current?.pause();
+  const pauseMotion = () => { if(autoScroll.current?.pause())manualScroll.current?.cancel(); };
+  const pauseForPointer = () => { pauseMotion(); manualScroll.current?.cancel(); };
   useEffect(() => {
     if (!fullScreen || !rootRef.current || typeof rootRef.current.animate !== 'function') return;
     if (rootRef.current.ownerDocument.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -142,6 +159,8 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   }, [fullScreen]);
   const palette = useArtworkPalette(track?.albumArt, rootRef);
   const accent = palette[0];
+  const translatedColor = translationColor(palette[1]);
+  const translationIndicator=translateLyrics && <span className="ytm-translation-indicator" role="img" aria-label={t('language.translate')} title={t('language.translate')} style={{color:translatedColor}}><MdTranslate size={fullScreen?22:17} aria-hidden="true"/></span>;
   const transportBusy = useRef(false);
   const changeTrack = async (previous: boolean) => {
     if (transportBusy.current || !track) return;
@@ -154,7 +173,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   const scroll = (direction: number, page = false) => {
     pauseMotion();
     const el = scrollRef.current;
-    if (el) el.scrollBy({ top: direction * (page ? Math.max(80, el.clientHeight * 0.75) : 64), behavior: 'smooth' });
+    if (el) manualScroll.current?.scroll(direction * (page ? Math.max(120, el.clientHeight * 0.75) : fullScreen ? 140 : 80));
   };
 
   const leaving = useRef(false);
@@ -183,7 +202,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     : { position:'relative', isolation:'isolate', width: '100%', maxWidth: '100%', minWidth: 0, height: '100%', minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' as const, padding: '6px 4px 4px', display: 'flex', flexDirection: 'column' as const, gap: 8, background: '#101823' };
   const readerStyle = fullScreen
     ? { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: 'clamp(18px, 3vw, 40px)', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, textAlign: 'center' as const, fontFamily:'"YouTube Sans", Roboto, Arial, sans-serif', fontSize: 'clamp(20px, 2.1vw, 32px)', lineHeight: 1.72, letterSpacing:'-.014em', whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const }
-    : { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: '10px 12px', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'smooth' as const, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const };
+    : { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: '10px 12px', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const };
 
   const lyricsContent = loading
     ? <div className="ytm-muted" style={fullScreen ? { height:'100%', display:'grid', placeItems:'center', fontSize:12, fontWeight:400, opacity:.55 } : undefined}>{t('lyrics.loading')}</div>
@@ -194,12 +213,14 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
             {result.timedLines.map((line, index) => <div key={index} data-lyric-index={index}
               className={`ytm-lyric-line${index === activeLine ? ' ytm-lyric-active' : ''}`}
               style={{ display:'block', position:'relative', padding:fullScreen ? '18px 0' : '9px 0', margin:0, lineHeight:1.6, fontWeight:fullScreen ? 650 : 600, whiteSpace:'pre-wrap', color:index === activeLine ? '#fff' : 'rgba(255,255,255,.42)' }}>
-              <span style={{ display:'block', transform:index === activeLine ? `scale(${fullScreen ? 1.08 : 1.03})` : `scale(${fullScreen ? .90 : .92})`, opacity:index === activeLine ? 1 : .68, transformOrigin:'center', transition:'transform 220ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease-out' }}>{line.text || '\u00a0'}</span>
-              {translatedLines?.[index] && translatedLines[index] !== line.text && <span style={{display:'block',fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:'#c6d6e5',opacity:index === activeLine ? .92 : .27,transform:index === activeLine ? 'scale(1)' : 'scale(.94)',transformOrigin:'center',transition:'opacity 220ms ease-out, transform 220ms cubic-bezier(.2,.8,.2,1)',lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></span>}
+              <div className="ytm-lyric-pair" style={{transform:index === activeLine ? `scale(${fullScreen ? 1.08 : 1.03})` : `scale(${fullScreen ? .90 : .92})`, opacity:index === activeLine ? 1 : .30, transformOrigin:'center', transition:'transform 220ms cubic-bezier(.2,.8,.2,1), opacity 220ms ease-out',color:'#fff'}}>
+                <span style={{display:'block'}}>{line.text || '\u00a0'}</span>
+                {translatedLines?.[index] && translatedLines[index] !== line.text && <span style={{display:'block',fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:translatedColor,opacity:.92,lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></span>}
+              </div>
             </div>)}
           </div>
         : result.lyrics
-          ? translatedLines ? <div>{result.lyrics.split('\n').map((line,index) => <div key={index} style={{marginBottom:fullScreen ? 18 : 10}}><div>{line || '\u00a0'}</div>{translatedLines[index] && translatedLines[index] !== line && <div style={{fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:'#c6d6e5',opacity:.82,lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></div>}</div>)}</div> : result.lyrics
+          ? translatedLines ? <div>{result.lyrics.split('\n').map((line,index) => <div key={index} style={{marginBottom:fullScreen ? 18 : 10}}><div>{line || '\u00a0'}</div>{translatedLines[index] && translatedLines[index] !== line && <div style={{fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:translatedColor,opacity:.82,lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></div>}</div>)}</div> : result.lyrics
           : (track ? 'Lyrics not available' : 'Your next song starts here.');
 
   return (
@@ -230,7 +251,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       {fullScreen && <ArtworkBackdrop palette={palette} animated />}
       {!fullScreen && <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexShrink: 0, minHeight:28, alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
         {!fullScreen && <SiYoutubemusic className="ytm-cover-logo" size={22} style={{ color:`rgb(${accent})`, flexShrink:0 }} aria-label="YouTube Music" />}
-        <div style={{ minWidth: 0, textAlign:'left', flex: 1, padding:0 }}><div style={{ fontSize:15, fontWeight:700 }}>{t('lyrics.title')}</div></div>
+        <div style={{ minWidth: 0, textAlign:'left', flex: 1, padding:0 }}><div style={{display:'flex',alignItems:'center',gap:6,minWidth:0,fontSize:15,fontWeight:700}}><span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t('lyrics.title')}</span></div></div>
         {!fullScreen && <DialogButton className="ytm-button" aria-label={t('lyrics.fullscreen')} onOKActionDescription={t('lyrics.fullscreen')} style={{ width:32, flexShrink:0, minWidth:32, height:28, minHeight:28, padding:0, margin:0, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={openFullscreen}><FaExpand size={13} /></DialogButton>}
         <DialogButton className="ytm-button" onOKActionDescription={t('common.back')} style={{ width:72, minWidth:0, height:28, minHeight:28, padding:'0 8px', lineHeight:'28px', margin:0, fontSize:11 }} onClick={leave}><FaArrowLeft /> {t('common.back')}</DialogButton>
       </div>}
@@ -250,10 +271,15 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
           {source && <div className="ytm-lyrics-source" style={{ marginTop:12, fontSize:fullScreen ? 10 : 9, lineHeight:1.4, color:`rgb(${accent})`, opacity:.82, overflowWrap:'anywhere' }}>
             Source: {source}
           </div>}
+          {translateLyrics && <div className="ytm-translation-status" style={{ marginTop:8, display:'flex', alignItems:'center', justifyContent:fullScreen ? 'center' : 'flex-start', gap:6, color:translatedColor }}>
+            {translationIndicator}
+            {translationLoading && <span role="status" style={{minWidth:0,fontSize:fullScreen ? 10 : 9,lineHeight:1.4,overflowWrap:'anywhere'}}>{t('lyrics.translating')}</span>}
+          </div>}
           {translationError && <div role="status" style={{ marginTop:8, fontSize:fullScreen ? 10 : 9, lineHeight:1.35, color:'#c6d6e5', opacity:.75, overflowWrap:'anywhere' }}>{translationError}</div>}
+          {translationError && <DialogButton className="ytm-button" disabled={translationLoading} style={{width:'100%',minWidth:0,fontSize:10,marginTop:8}} onClick={() => setTranslationAttempt(value => value+1)}>{t('lyrics.retryTranslation')}</DialogButton>}
         </div>
         {!centered && <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 0', maxWidth:fullScreen ? 620 : undefined, alignSelf: 'stretch', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
-          <Focusable ref={scrollRef} preferredFocus={!fullScreen} noFocusRing tabIndex={0} onWheel={pauseMotion} onTouchStart={pauseMotion} onTouchMove={pauseMotion} onPointerDown={pauseMotion} focusClassName="ytm-reader-focus"
+          <Focusable ref={scrollRef} preferredFocus={!fullScreen} noFocusRing tabIndex={0} onWheel={pauseForPointer} onTouchStart={pauseForPointer} onTouchMove={pauseForPointer} onPointerDown={pauseForPointer} onPointerMove={event=>{if(event.buttons)pauseForPointer();}} onPointerUp={pauseForPointer} focusClassName="ytm-reader-focus"
             className="ytm-reader ytm-card" role="region" aria-label={t('lyrics.region')}
             onGamepadDirection={event => {
               const button = event.detail.button;

@@ -32,6 +32,22 @@ const defaultState: PlayerState = {
   duration: 0,
 };
 
+let cachedControls:Partial<PlayerState>={};
+let authRevision=0;
+export function rememberAuthState(authenticated:boolean){
+  authRevision++;
+  cachedControls={...cachedControls,authenticated,authReady:true};
+}
+export function warmPlayerState(){
+  const revision=authRevision;
+  void call<[],{authenticated:boolean}>('get_auth_state').then(auth=>{
+    if(revision===authRevision)cachedControls={...cachedControls,authenticated:auth.authenticated,authReady:true};
+  }).catch(()=>{});
+  void call<[],{shuffle:boolean;repeat:string;volume:number}>('get_playback_state').then(state=>{
+    cachedControls={...cachedControls,shuffle:state.shuffle,repeat:state.repeat as PlayerState['repeat'],volume:state.volume*100};
+  }).catch(()=>{});
+}
+
 type Action =
   | { type: 'UPDATE'; payload: Partial<PlayerState> }
   | { type: 'SET_TRACK'; payload: TrackInfo | null }
@@ -61,14 +77,22 @@ const PlayerContext = createContext<PlayerContextValue>({
 });
 
 export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(reducer, defaultState);
+  const [state, dispatch] = useReducer(reducer, {
+    ...defaultState, ...cachedControls, track:getCurrentTrack(), isPlaying:getIsPlaying(),
+    castConnected:getIsCastConnected(), castNetwork:getNetworkInfo(),
+    castSenderName:getCastSenderName(), ...getProgress(),
+  });
 
   const updateState = useCallback((partial: Partial<PlayerState>) => {
+    for(const key of ['volume','repeat','shuffle'] as const){
+      if(partial[key]!==undefined)cachedControls={...cachedControls,[key]:partial[key]};
+    }
     dispatch({ type: 'UPDATE', payload: partial });
   }, []);
 
   // Sync with audio manager on mount (panel open)
   useEffect(() => {
+    const revision=authRevision;
     const onAuthChanged = (event: Event) => {
       dispatch({ type:'UPDATE', payload:{ authenticated:(event as CustomEvent<boolean>).detail, authReady:true } });
     };
@@ -111,6 +135,8 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
     // succeeds, consumers keep the cast-only/login hint hidden instead of
     // briefly showing a false "no cookies" state on every panel open.
     void call<[], { authenticated: boolean }>('get_auth_state').then(auth => {
+      if(revision!==authRevision)return;
+      cachedControls={...cachedControls,authenticated:auth.authenticated,authReady:true};
       dispatch({ type:'UPDATE', payload:{ authenticated:auth.authenticated, authReady:true } });
     }).catch(e => console.error('[YTM] Failed to fetch auth state:', e));
 

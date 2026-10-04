@@ -32,9 +32,11 @@ jobs:
       - name: Typecheck and build
         run: |
           pnpm exec tsc --noEmit --skipLibCheck
+          pnpm run typecheck:backend
           pnpm run build
           pnpm run build:backend
       - name: Test
         run: |
           pnpm test
+          pnpm exec vitest run --maxWorkers=1 --minWorkers=1
           pnpm run test:python

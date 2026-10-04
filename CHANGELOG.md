@@ -1,5 +1,91 @@
 # Historial de cambios
 
+## 0.7.0
+
+- Library y Search permiten explorar canciones, álbumes, artistas y playlists, con Play/Shuffle en las colecciones y opciones individuales de cola. La búsqueda conserva su estado y recibe la categoría inicial de Library.
+- Las ventanas nuevas de álbum, artista o playlist enfocan Play. B restaura categoría, página, posición y elemento de la ventana anterior, incluso al regresar de un álbum a la sección Albums de un artista.
+- Refresh muestra una tanda nueva antes de completar las continuaciones. Las playlists usan sesiones de red independientes y caché compartida; una respuesta anterior al refresh no puede reemplazar los datos nuevos.
+- El selector de Library tiene foco redondeado y legible, sin superponer bordes o cambiar la escala. Queue incorpora paginación inferior y todos los paginadores comparten el mismo comportamiento.
+- Se consolidan las correcciones de las betas: seguimiento de letras, traducciones gratuitas con caché y fallback, UUID persistente de Cast, controles locales validados y orígenes restringidos.
+- README actualizado con siete capturas nuevas; la imagen de diagnóstico del cursor queda excluida. El instalador y el código fuente se distribuyen por separado.
+
+## 0.7.0-beta.9
+
+- Queue incorpora Previous y Next inferiores. La paginación por botones mantiene el foco en el control superior correspondiente y vuelve al inicio de la lista; los gatillos conservan el acceso a la primera fila.
+- Las ventanas de Search, playlist y artista/álbum dejan de recordar el paginador inferior como último hijo del grupo de canciones. Al bajar desde Next superior se entra por la primera fila de la nueva página.
+- Search conserva la categoría inicial de Library, pero enfoca el campo de búsqueda para escribir inmediatamente. B y Back vuelven al plugin en Library; el estado de búsquedas realizadas se conserva.
+- Se suaviza el aspecto de hover y foco en los controles de las ventanas: bordes redondeados, sin escalado ni una segunda capa rectangular de enfoque.
+- Se adopta la revisión de Claude: hook compartido de paginación, limpieza de una condición redundante y validación de videoId en queue/jump. Las solicitudes mayores de 1 MB reciben 413 antes de terminar la carga, se pausa su lectura y se cierra la conexión después de entregar la respuesta.
+- El reinicio del scroll localiza el contenedor por su overflow real; la clase privada de Steam queda únicamente como respaldo.
+
+## 0.7.0-beta.8
+
+- Se confirma y corrige el UUID persistente de Cast: la compilación pasa la identidad guardada al anunciante DIAL/SSDP. La reparación es reproducible y la compilación falla si no puede aplicarla.
+- Seek y volumen validan números; los comandos rechazan JSON inválido y cuerpos demasiado grandes. HTTP y WebSocket admiten los orígenes locales de Steam y bloquean páginas externas.
+- El heartbeat congela la misma estimación limitada a 15 segundos que informa al teléfono. Los IDs de reintento tienen tipo string o null.
+- Next y Previous conservan el cursor en el botón superior correspondiente. Usar el control inferior sube la lista y devuelve el foco al superior; los gatillos conservan el enfoque en la primera fila.
+- Search hereda la categoría de Library antes de la primera búsqueda y enfoca ese filtro. Después conserva su consulta, filtro, resultados y página, aunque se abra desde otra categoría.
+- Los resultados de Search usan paginación de 40 elementos; el código para revisión incluye los tests de backend y la reparación de compilación.
+
+## 0.7.0-beta.7
+
+- Se integra la revisión de Claude: ordenamiento memoizado en playlists y catálogo, lecturas de preferencias en memoria y lectura directa de píxeles al extraer paletas.
+- La caché de preferencias se invalida con eventos storage de otras ventanas de Steam, conserva opciones durante la sesión si falla el almacenamiento y libera sus observadores al descargar el plugin.
+- La lectura automática sin timing usa RAF mientras se mueve y un único timeout para sus esperas. Pausar u ocultar el lector detiene los frames; el regreso manual de cinco segundos se conserva incluso durante una pausa de reproducción.
+- Cambiar categorías mantiene el cursor en el selector, incluso al pasar entre playlists y las otras categorías. Los filtros de artistas dejan de enfocar la primera canción al cambiar de categoría.
+- El resultado del reinicio Cast aparece arriba del formulario y se lleva a la vista. El mensaje se traduce a los siete idiomas; un doble clic no inicia dos reinicios.
+- Cast descarta eventos del receptor anterior después de reiniciar y escrituras diferidas de volumen de una sesión antigua. Los errores al restaurar volumen se manejan sin propagarse como rechazos no controlados.
+
+## 0.7.0-beta.6
+
+- El SVG de traducción queda debajo de Source en ambos lectores, junto a Translating mientras carga. Ya no comparte espacio con el logo de YouTube Music.
+- El icono y las letras traducidas comparten un pastel del color secundario de la portada: claro, con matiz visible y sin llegar al blanco. Las portadas monocromáticas conservan tonos neutros.
+- Se conserva la animación y el difuminado compartido de original y traducción, además del regreso automático tras cinco segundos de lectura manual.
+
+## 0.7.0-beta.5
+
+- Sort conserva el foco en su botón al alternar el orden. Las filas dejan de pedir foco al ordenar, incluso después de haber cambiado de página o al terminar una carga en segundo plano.
+- Los encabezados de Library dicen Your saved playlists/albums/songs/artists, con equivalentes en los siete idiomas.
+- Las letras sincronizadas retoman la línea cantada tras cinco segundos desde el último movimiento manual, en pestaña y fullscreen. La lectura sin timing retoma su posición automática con el mismo plazo.
+- El desplazamiento manual y el seguimiento usan una sola animación. Se evita que un frame manual antiguo compita con el regreso o quede activo por redondeo de píxeles; se desactiva el smooth nativo en el lector para no duplicar interpolaciones.
+- Un SVG de traducción identifica la opción en Settings y aparece en ambos lectores cuando está activada, aunque la traducción siga cargando.
+
+## 0.7.0-beta.4
+
+- Una barra superior reúne filtro, ordenar y actualizar en todas las categorías de Library. Los encabezados distinguen tus playlists, álbumes, canciones y artistas en los siete idiomas.
+- Álbumes, canciones y artistas guardan su orden predeterminado, A–Z o Z–A por separado. El reordenado manual sigue siendo exclusivo de las playlists; ordenar alfabéticamente carga el catálogo completo en segundo plano.
+- Reproducir desde una colección cierra sus páginas, incluso al navegar de artista a álbum, y vuelve al Player. Play next y agregar a la cola mantienen abierta la colección. El destino Player sobrevive al remontaje del panel.
+- Las traducciones usan un matiz muy claro de la portada y mantienen la misma animación y difuminado que el texto original.
+- Las letras sincronizadas se centran cuando el diseño está listo y se ajustan si cambia la altura de las traducciones. La llegada de la traducción conserva el plazo de lectura manual; después de tres segundos vuelve el seguimiento.
+- Las letras sin timing también regresan a su posición de lectura automática después del desplazamiento manual; el desplazamiento continúa respetando la pausa de reproducción.
+
+## 0.7.0-beta.3
+
+- Library separa con 12 px sus bloques de búsqueda, paginación, resultados y actualización; las tarjetas conservan su separación de 8 px.
+- Refresh library usa el mismo tamaño de texto que Previous/Next y queda separado del paginador inferior.
+- El contador mantiene ancho estable para sus números y los botones se adaptan al espacio disponible en paneles estrechos.
+
+## 0.7.0-beta.2
+
+- Play y Shuffle en las filas de álbumes, artistas y playlists de Library, Search y las vistas de artistas. Al abrir una colección aparecen también Play next y Add all.
+- Cada artista abre en Canciones. Se elimina Todo de los filtros visibles y se distingue Artistas similares; las fotos son cuadradas y mantienen el encuadre al abrirse.
+- Library muestra la primera tanda antes de cargar más en segundo plano. Next obtiene resultados adicionales sin un botón redundante de Cargar más, vuelve al inicio y enfoca la primera canción; L2/R2 conservan esa navegación.
+- Traducción gratuita: Apertium respalda a MyMemory en los pares de idiomas compatibles. Se reducen las esperas de red y se conservan caché y resultados parciales.
+- Las solicitudes de traducción para canciones o idiomas diferentes ya no se bloquean entre sí. Se corrige una carrera de inicialización del detector de idioma y se reutiliza su resultado.
+- Pruebas de acciones, filtros, fotos, carga progresiva, foco de paginación, respaldo tras cuota agotada y detección concurrente.
+
+## 0.7.0-beta.1
+
+- Library filtra playlists, álbumes, artistas y canciones; Search incorpora los mismos filtros y una vista de todos los resultados.
+- Los álbumes abren sus canciones y las acciones para reproducir o añadir todo. Los artistas abren canciones, álbumes, sencillos y artistas relacionados, con filtros y navegación de regreso.
+- Las listas nuevas usan páginas de 40 elementos y navegación con L2/R2; al cambiar página se mueve el foco a la primera canción y se vuelve al inicio.
+- Traducción gratuita sin claves: caché persistente por línea, versos repetidos reutilizados, recuperación de resultados parciales y reintento visible. El límite diario del proveedor sigue aplicando; nunca se reemplazan los originales por mensajes de error.
+- Original y traducción comparten exactamente la misma animación de enfoque y opacidad. El desplazamiento manual de letras acumula el movimiento del mando y responde más rápido.
+- El estado del audio se restaura en el primer render; las paletas se calculan al cambiar de canción, se guardan localmente y se adelantan para las dos próximas canciones. La apertura espera a la paleta inicial.
+- Se detiene el audio antes de vaciar los datos al final de la cola y se descartan respuestas tardías de reanudación después de Stop.
+- Las selecciones manuales siguen sin notificar después de un reintento de audio o una pausa; las canciones que avanzan automáticamente conservan sus notificaciones.
+- Las playlists reutilizan datos recientes y comparten solicitudes concurrentes. Las lecturas del catálogo y sus continuaciones usan sesiones separadas para no bloquear controles de reproducción.
+
 ## 0.6.9
 
 - Abre playlists para explorar canciones y reproducir o añadir cada pista; mejora paginación y navegación con controles de Steam.

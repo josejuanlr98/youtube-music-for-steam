@@ -8,7 +8,7 @@ let effects = [], calls = [];
 const jsx = (type, props) => ({ type, props });
 const modules = {
   'react/jsx-runtime': { jsx, jsxs:jsx },
-  'react': { useState:value => [typeof value === 'function' ? value() : value, () => {}], useEffect:fn => effects.push(fn), useRef:()=>({current:null}) },
+  'react': { useState:value => [typeof value === 'function' ? value() : value, () => {}], useEffect:fn => effects.push(fn), useRef:()=>({current:null}), useMemo:fn=>fn() },
   '@decky/api': { call:async name => { calls.push(name); return { rating:'LIKE', playlists:[] }; } },
   '@decky/ui': { DialogButton:'button', Focusable:'focusable', Navigation:{} },
   '../context/PlayerContext': { usePlayer:() => state },
@@ -24,6 +24,14 @@ const modules = {
   '../services/i18n': { useI18n:() => ({ t:key => ({'player.lyrics':'Lyrics','common.previous':'Previous','player.play':'Play','player.pause':'Pause','common.next':'Next','player.like':'Like','player.dislike':'Dislike'}[key] || key) }) },
   './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
   './ThemeScope': { ThemeScope:'theme' },
+  './LibraryToolbar':{LibraryToolbar:'library-toolbar'},
+  './CatalogList':{CatalogFilters:'filters'},
+  './CatalogLibrary':{CatalogLibrary:'catalog-library'},
+  '../services/catalog':{},
+  '../services/browseState':require('./browse_fixture.cjs'),
+  '../services/playlistData':{clearPlaylistData(){}},
+  '../services/playlistLibrary':{cachedPlaylistLibrary:()=>undefined,loadPlaylistLibrary:async()=>{calls.push('get_library_playlists');return {playlists:[]};}},
+  '../services/searchState':{openSearch(){}},
   './OverflowText': { OverflowText:'overflow-text' },
 };
 function load(file) {
@@ -45,7 +53,8 @@ const { PlayerView } = load('PlayerView.tsx');
 (async () => {
   const guestLibrary = LibraryView({});
   assert.equal(guestLibrary.type, 'div');
-  assert.equal(effects.length, 0, 'guest library must not mount account fetching effects');
+  for(const effect of effects)effect();
+  assert.deepEqual(calls, [], 'guest library must not fetch account data');
   const guestPlayer = flatten(PlayerView());
   for (const effect of effects) effect();
   assert.deepEqual(calls, [], 'Cast-only player must not request song ratings');

@@ -25,6 +25,7 @@ let castRevision = 0;
 let queueRevision = 0;
 let queueMirror: Promise<unknown> = Promise.resolve();
 let localRetryId: string | null = null;
+let localManualPlayback = false;
 let retryInFlight = false;
 let failedLocalTracks = 0;
 let skippingLocal = false;
@@ -36,7 +37,8 @@ async function skipFailedLocalTrack() {
   try {
   const result = await call<[string], TrackInfo & { stopped?:boolean; error?:string }>('skip_unplayable', currentTrack.videoId);
   if (generation !== playbackGeneration || stoppingAll) return;
-  if (result.stopped || result.error || !result.url) { notifyPlaying(false); return; }
+  if (result.stopped) { clearPlayback(); return; }
+  if (result.error || !result.url) { notifyPlaying(false); return; }
   await loadAndPlay(result);
   } finally { skippingLocal = false; }
 }
@@ -169,7 +171,19 @@ function notifyTrack(track: TrackInfo | null) {
   currentTrack = track;
   trackChangeListeners.forEach((fn) => fn(track));
 }
-function notifyPlaying(value: boolean, manual = false) {
+/** Metadata may only be cleared after the media element has been silenced. */
+function clearPlayback() {
+  playbackGeneration++;
+  playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
+  stopCastProgress();
+  notifyPlaying(false);
+  audioElement?.pause();
+  audioElement?.removeAttribute('src');
+  audioElement?.load();
+  notifyTrack(null);
+  notifyProgress(0, 0);
+}
+function notifyPlaying(value: boolean, manual = playbackSource === 'local' && localManualPlayback) {
   isPlaying = value;
   playStateListeners.forEach((fn) => fn(value));
   if (value && currentTrack) playbackStartedListeners.forEach(fn => fn(currentTrack!, manual));
@@ -342,15 +356,7 @@ function handleCastMessage(msg: any) {
       break;
     case 'stop':
       if (playbackSource !== 'cast') break;
-      playbackGeneration++;
-      castPlaybackId = null;
-      pendingCastEnded = false;
-      audioElement?.pause();
-      if (audioElement) audioElement.src = '';
-      stopCastProgress();
-      notifyPlaying(false);
-      notifyTrack(null);
-      notifyProgress(0, 0);
+      clearPlayback();
       break;
     case 'seek':
       if (playbackSource !== 'cast') break;
@@ -483,7 +489,7 @@ async function handleLocalTrackEnded() {
     const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('track_ended');
     if (generation !== playbackGeneration) return;
     if (result.stopped) {
-      notifyPlaying(false); notifyTrack(null); return;
+      clearPlayback(); return;
     }
     if (result.error || !result.url) { notifyPlaying(false); return; }
     await loadAndPlay(result);
@@ -506,7 +512,8 @@ async function handleLocalError() {
 
 async function loadAndPlay(track: TrackInfo, retry = false, manual = false) {
   if (stoppingAll || !audioElement || !track.url) return;
-  if (!retry) localRetryId = null;
+  if (!retry) { localRetryId = null; localManualPlayback = manual; }
+  else manual = localManualPlayback;
   const generation = ++playbackGeneration;
   playbackSource = 'local';
   castPlaybackId = null;
@@ -552,6 +559,7 @@ export function initAudio() {
   audioElement.addEventListener('error', onAudioError);
   audioElement.addEventListener('pause', onAudioPause);
   audioElement.addEventListener('timeupdate', onAudioTimeUpdate);
+  if (!currentTrack && audioElement.getAttribute?.('src')) clearPlayback();
   connectCast();
 }
 
@@ -573,6 +581,7 @@ export function destroyAudio() {
   senderNotified = false;
   if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
   playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
+  localManualPlayback=false;
   castQueue = { tracks: [], position: -1 };
   trackChangeListeners = []; playStateListeners = [];
   playbackStartedListeners = []; senderConnectedListeners = [];
@@ -606,11 +615,13 @@ export function resumePlayback() {
     void castPost('/api/play');
     return;
   }
-  if (audioElement?.src) {
+  if (currentTrack && audioElement?.src) {
+    const generation=playbackGeneration;
     void audioElement.play().then(() => {
+      if(generation!==playbackGeneration)return;
       notifyPlaying(true);
       void call('resume');
-    }).catch(() => notifyPlaying(false));
+    }).catch(() => {if(generation===playbackGeneration)notifyPlaying(false);});
   }
 }
 export function togglePlayback() {
@@ -621,7 +632,7 @@ export async function playNext() {
   const generation = playbackGeneration;
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('next_track');
   if (generation !== playbackGeneration) return;
-  if (result.stopped) { notifyPlaying(false); notifyTrack(null); return; }
+  if (result.stopped) { clearPlayback(); return; }
   if (result.error || !result.url) return;
   await loadAndPlay(result);
 }

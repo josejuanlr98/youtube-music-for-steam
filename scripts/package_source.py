@@ -4,17 +4,20 @@ from pathlib import Path
 import zipfile
 
 
-SOURCE_DIRS = ("src", "backend/src", "backend/xml", "tests", "scripts")
+SOURCE_DIRS = ("src", "backend/src", "backend/tests", "backend/xml", "tests", "scripts")
 SOURCE_FILES = (
     "main.py",
     "py_modules/ytm_firefox.py",
     "py_modules/ytm_lyrics.py",
     "py_modules/ytm_translation.py",
+    "py_modules/ytm_catalog.py",
     "package.json",
     "pnpm-lock.yaml",
     "rollup.config.js",
     "tsconfig.json",
     "backend/tsconfig.json",
+    "vitest.config.ts",
+    ".github/workflows/ci.yml",
     "requirements.txt",
     "plugin.json",
     "build.ps1",

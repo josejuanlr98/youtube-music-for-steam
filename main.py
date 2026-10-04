@@ -105,19 +105,24 @@ class Plugin:
         client = self.ytmusic
         if client is None:
             raise RuntimeError('Not authenticated')
-        # Full playlist continuations must not monopolize the interactive
-        # account session. Give that one bulk request a separate HTTP session.
+        # Catalogue and continuation reads use independent bounded sessions so
+        # they cannot block playback or account mutations behind a shared lock.
         from ytmusicapi import YTMusic
-        bulk = method in ('get_playlist', 'get_liked_songs') and kwargs.get('limit', 1) is None
+        bulk = method in ('get_playlist', 'get_liked_songs', 'get_library_playlists', 'get_library_albums',
+                          'get_library_artists', 'get_library_songs', 'get_artist',
+                          'get_artist_albums', 'get_album', 'search')
         if bulk and isinstance(client, YTMusic):
-            with self._account_lock():
-                headers = dict(client._auth_headers)
+            headers = dict(client._auth_headers)
             def read_bulk():
-                candidate = YTMusic(headers)
+                import requests
+                from functools import partial
+                session = requests.Session()
+                session.request = partial(session.request, timeout=(5, 12))
                 try:
+                    candidate = YTMusic(headers, requests_session=session)
                     return getattr(candidate, method)(*args, **kwargs)
                 finally:
-                    candidate._session.close()
+                    session.close()
             return await asyncio.to_thread(read_bulk)
         def invoke():
             from requests.exceptions import ConnectionError, Timeout
@@ -840,6 +845,19 @@ class Plugin:
             "shuffle": self.shuffle, "shuffleOrder": list(self.shuffle_order), "repeat": self.repeat,
         }
 
+    async def get_upcoming_artwork(self):
+        # Return only two small URLs, never a whole large queue on every song.
+        order = self.shuffle_order if self.shuffle and self.shuffle_order else list(range(len(self.queue)))
+        try:
+            start = order.index(self.queue_position) + 1
+        except ValueError:
+            start = 0
+        upcoming = order[start:start + 2]
+        if self.repeat == 'ALL' and len(upcoming) < 2:
+            upcoming += order[:2 - len(upcoming)]
+        return {'urls': [self.queue[index]['albumArt'] for index in upcoming
+                         if 0 <= index < len(self.queue) and self.queue[index].get('albumArt')]}
+
     async def edit_queue(self, index, action, expected_ids):
         # Reject stale UI selections, including duplicate songs at different positions.
         if expected_ids != [t.get("videoId") for t in self.queue]:
@@ -918,18 +936,27 @@ class Plugin:
 
     _cached_playlists = None
 
-    async def get_library_playlists(self, refresh=False):
+    async def get_library_playlists(self, refresh=False, limit=None):
         if not self.ytmusic:
             return {"error": "Not authenticated"}
+        if limit not in (None, 0) or isinstance(limit, bool):
+            return {'error': 'Invalid playlist library limit'}
         if refresh:
+            self._advance_library_epoch('playlist-library')
+            self._cached_playlists = None
             self._playlist_tracks_cache = {}
             self._playlist_preview_cache = {}
             self._playlist_start_urls = {}
         if self._cached_playlists and not refresh:
             return {"playlists": self._cached_playlists}
+        return await self._catalog_read(('playlist-library', limit),
+                                        lambda: self._read_library_playlists(limit), refresh)
+
+    async def _read_library_playlists(self, limit):
         try:
             client = self.ytmusic
-            playlists = await self._api_call('get_library_playlists', limit=None)
+            epoch = getattr(self, '_library_epochs', {}).get('playlist-library', 0)
+            playlists = await self._api_call('get_library_playlists', limit=limit)
             result = []
             # Liked Songs first
             result.append({
@@ -952,13 +979,146 @@ class Plugin:
                 })
             if self.ytmusic is not client:
                 return {'error': 'Account changed. Please reload Library.'}
-            self._cached_playlists = result
-            return {"playlists": result}
+            if epoch != getattr(self, '_library_epochs', {}).get('playlist-library', 0):
+                return {'error': 'Library changed while loading. Please refresh.'}
+            if limit is None:
+                self._cached_playlists = result
+            return {"playlists": result, 'hasMore': limit == 0 and bool(playlists)}
         except Exception as e:
             decky.logger.error(f"Failed to get library playlists: {e}")
             return self._account_error(e)
 
     # ── Search ─────────────────────────────────────────────────────
+
+    def _advance_library_epoch(self, category):
+        epochs = getattr(self, '_library_epochs', {})
+        self._library_epochs = epochs
+        epochs[category] = epochs.get(category, 0) + 1
+        cache = getattr(self, '_catalog_cache', {})
+        prefix = (id(self.ytmusic), 'playlist-library') if category == 'playlist-library' else (id(self.ytmusic), 'library', category)
+        for key in list(cache):
+            if key[:len(prefix)] == prefix:
+                cache.pop(key, None)
+
+    async def _catalog_read(self, key, loader, refresh=False):
+        client = self.ytmusic
+        if client is None:
+            return {'error': 'Not authenticated'}
+        cache = getattr(self, '_catalog_cache', {})
+        self._catalog_cache = cache
+        category = key[1] if key[0] == 'library' else 'playlist-library' if key[0] == 'playlist-library' else None
+        epoch = getattr(self, '_library_epochs', {}).get(category, 0)
+        account_key = (id(client), *key, epoch)
+        cached = cache.get(account_key)
+        if not refresh and cached and time.monotonic() - cached[0] < 300:
+            return cached[1]
+        pending = getattr(self, '_catalog_pending', {})
+        self._catalog_pending = pending
+        task = pending.get(account_key)
+        if task is None:
+            async def read():
+                try:
+                    result = await loader()
+                    if client is not self.ytmusic:
+                        return {'error': 'Account changed. Please reload Library.'}
+                    if category and epoch != getattr(self, '_library_epochs', {}).get(category, 0):
+                        return {'error': 'Library changed while loading. Please refresh.'}
+                    if 'error' not in result:
+                        if len(cache) >= 32:
+                            cache.pop(next(iter(cache)))
+                        cache[account_key] = (time.monotonic(), result)
+                    return result
+                except Exception as error:
+                    return self._account_error(error)
+            task = asyncio.create_task(read())
+            pending[account_key] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and pending.get(account_key) is task:
+                pending.pop(account_key, None)
+
+    async def get_library_items(self, category='playlists', refresh=False, limit=100):
+        from ytm_catalog import KINDS, entries
+        if not isinstance(category, str) or category not in KINDS:
+            return {'error': 'Unsupported library category'}
+        try:
+            limit = int(limit) if limit is not None else None
+            if limit is not None and (limit < 0 or limit > 5000):
+                raise ValueError()
+        except (TypeError, ValueError):
+            return {'error': 'Invalid library limit'}
+        if refresh:
+            self._advance_library_epoch(category)
+        async def load():
+            if category == 'playlists':
+                result = await self.get_library_playlists(refresh)
+                if 'error' in result:
+                    return result
+                items = [{**p, 'thumbnails': [{'url': p['thumbnail']}] if p.get('thumbnail') else []}
+                         for p in result.get('playlists', [])]
+            else:
+                items = await self._api_call('get_library_' + category, limit=limit)
+            normalized = entries(items, KINDS[category])
+            # Zero requests only the native first page, without continuations.
+            return {'entries': normalized, 'hasMore': category != 'playlists' and bool(items) and limit is not None and (limit == 0 or len(items) >= limit),
+                    'limit': limit}
+        return await self._catalog_read(('library', category, limit), load, refresh)
+
+    async def search_catalog(self, query, category='all'):
+        from ytm_catalog import KINDS, entries
+        if not isinstance(category, str) or category not in ('all', *KINDS):
+            return {'error': 'Unsupported search category'}
+        if not isinstance(query, str) or not query.strip():
+            return {'entries': []}
+        query = query.strip()[:200]
+        async def load():
+            items = await self._api_call('search', query, filter=None if category == 'all' else category, limit=40)
+            return {'entries': entries(items, KINDS.get(category))}
+        return await self._catalog_read(('search', query, category), load)
+
+    async def get_catalog_detail(self, kind, identifier, section='all'):
+        from ytm_catalog import entries, artwork
+        if not isinstance(kind, str) or kind not in ('album', 'artist') or not isinstance(identifier, str) or not identifier or len(identifier) > 160:
+            return {'error': 'Invalid catalogue selection'}
+        if not isinstance(section, str) or section not in ('all', 'songs', 'albums', 'singles', 'artists'):
+            return {'error': 'Invalid artist filter'}
+        async def load():
+            data = await (self._catalog_read(('artist-metadata', identifier),
+                          lambda: self._api_call('get_artist', identifier)) if kind == 'artist'
+                          else self._api_call('get_album', identifier))
+            if 'error' in data:
+                return data
+            image = artwork(data)
+            if kind == 'album':
+                defaults = {'artists': data.get('artists') or [], 'image': image, 'album': data.get('title') or ''}
+                return {'title': data.get('title') or '', 'image': image, 'kind': kind,
+                        'playlistId': data.get('audioPlaylistId'),
+                        'entries': entries(data.get('tracks'), 'song', defaults)}
+            name = data.get('name') or ''
+            groups = [('songs', 'song'), ('albums', 'album'), ('singles', 'album'), ('related', 'artist')]
+            result = []
+            for label, item_kind in groups:
+                if section != 'all' and label != ('related' if section == 'artists' else section):
+                    continue
+                group = data.get(label) or {}
+                items = group.get('results') or []
+                if section in ('albums', 'singles') and group.get('params'):
+                    items = await self._api_call('get_artist_albums', group.get('browseId') or identifier,
+                                                 group['params'], limit=200)
+                if section == 'songs' and group.get('browseId'):
+                    playlist_id = group['browseId'].removeprefix('VL')
+                    songs = await self.get_playlist_tracks(playlist_id, 100)
+                    if 'error' not in songs:
+                        items = [{'videoId': t['videoId'], 'title': t['title'], 'artist': t['artist'],
+                                  'duration_seconds': t['duration'], 'thumbnails': [{'url': t['albumArt']}]}
+                                 for t in songs.get('tracks', [])]
+                result.extend({**item, 'section': label} for item in entries(items, item_kind, {'artist': name}))
+            playlist_id = (data.get('songs') or {}).get('browseId') or data.get('shuffleId') or ''
+            return {'title': name, 'image': image, 'kind': kind, 'entries': result,
+                    'playlistId': playlist_id.removeprefix('VL') or None,
+                    'description': data.get('description') or ''}
+        return await self._catalog_read(('detail', kind, identifier, section), load)
 
     async def search_songs(self, query):
         if not self.ytmusic:
@@ -1000,7 +1160,7 @@ class Plugin:
         except ValueError:
             duration = 0
         track = {key: str(metadata.get(key) or '') for key in ('videoId', 'title', 'artist', 'albumArt')}
-        track.update(album='', duration=duration, likeStatus='INDIFFERENT')
+        track.update(album=str(metadata.get('album') or ''), duration=duration, likeStatus='INDIFFERENT')
         if not self.queue:
             self.queue_position = 0
             self.shuffle_order = []
@@ -1034,7 +1194,7 @@ class Plugin:
             "videoId": video_id,
             "title": metadata.get("title") or "Unknown",
             "artist": metadata.get("artist") or "",
-            "album": "",
+            "album": str(metadata.get("album") or ""),
             "albumArt": metadata.get("albumArt") or "",
             "duration": duration,
             "likeStatus": "INDIFFERENT",
@@ -1175,7 +1335,8 @@ class Plugin:
 
     async def translate_lyrics(self, lyrics, target):
         from ytm_translation import translate_lyrics
-        return await asyncio.to_thread(translate_lyrics, lyrics, target)
+        cache_file = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, 'lyric-translations.json')
+        return await asyncio.to_thread(translate_lyrics, lyrics, target, cache_file)
 
     async def stop_all(self):
         self._queue_load_error = ''
@@ -1208,6 +1369,24 @@ class Plugin:
                 'duration': duration, 'likeStatus': t.get('likeStatus') or 'INDIFFERENT'}
 
     async def get_playlist_tracks(self, playlist_id, limit=None):
+        if not isinstance(playlist_id, str) or not playlist_id.strip():
+            return {'error': 'No playlist selected'}
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 0 or limit > 2000):
+            return {'error': 'Invalid playlist limit'}
+        reads = getattr(self, '_playlist_reads', {})
+        self._playlist_reads = reads
+        key = (id(self.ytmusic), playlist_id, limit)
+        task = reads.get(key)
+        if task is None:
+            task = asyncio.create_task(self._get_playlist_tracks(playlist_id, limit))
+            reads[key] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and reads.get(key) is task:
+                reads.pop(key, None)
+
+    async def _get_playlist_tracks(self, playlist_id, limit=None):
         if not self.ytmusic:
             return {'error': 'Not authenticated'}
         if not isinstance(playlist_id, str) or not playlist_id.strip():
@@ -1218,12 +1397,12 @@ class Plugin:
             # again when the same large playlist is played or appended repeatedly.
             cache = getattr(self, '_playlist_tracks_cache', {})
             cached = cache.get(playlist_id)
-            if cached and cached[0] is client and time.monotonic() - cached[1] < 120:
-                return {'tracks': [dict(track) for track in cached[2]]}
+            if cached and cached[0] is client and time.monotonic() - cached[1] < 300:
+                return {'tracks': [dict(track) for track in cached[2]], 'complete': True}
             previews = getattr(self, '_playlist_preview_cache', {})
             preview = previews.get(playlist_id)
-            if limit == 0 and preview and preview[0] is client and time.monotonic() - preview[1] < 120:
-                return {'tracks': [dict(track) for track in preview[2]]}
+            if limit == 0 and preview and preview[0] is client and time.monotonic() - preview[1] < 600:
+                return {'tracks': [dict(track) for track in preview[2]], 'complete': False}
             data = await (self._api_call('get_liked_songs', limit=limit) if playlist_id == 'LM'
                           else self._api_call('get_playlist', playlist_id, limit=limit))
             if self.ytmusic is not client:
@@ -1232,19 +1411,19 @@ class Plugin:
             if not tracks:
                 return {'error': 'This playlist has no available songs.'}
             cache = {key: value for key, value in cache.items()
-                     if value[0] is client and time.monotonic() - value[1] < 120}
+                     if value[0] is client and time.monotonic() - value[1] < 300}
             while len(cache) >= 3:
                 cache.pop(next(iter(cache)))
             if limit is None:
                 cache[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
             self._playlist_tracks_cache = cache
             if limit == 0:
-                previews = {key:value for key,value in previews.items() if value[0] is client and time.monotonic() - value[1] < 120}
+                previews = {key:value for key,value in previews.items() if value[0] is client and time.monotonic() - value[1] < 600}
                 while len(previews) >= 6:
                     previews.pop(next(iter(previews)))
                 previews[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
                 self._playlist_preview_cache = previews
-            return {'tracks': tracks}
+            return {'tracks': tracks, 'complete': limit is None}
         except Exception as e:
             decky.logger.warning(f'Playlist load failed: {type(e).__name__}')
             return self._account_error(e)

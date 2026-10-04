@@ -5,10 +5,12 @@ import { FaMusic } from 'react-icons/fa';
 import { focusLyricsReader } from '../services/focus';
 
 /** One card, with separated controls so focus never creates scalloped joins. */
-export function MediaRow({ title, subtitle, image, icon, actions, selected, disabled, onPlay, editing, tintFocus = true, playDescription = 'Play', endIcon, focusRequest }: {
+export function MediaRow({ title, subtitle, image, icon, actions, selected, disabled, onPlay, editing, tintFocus = true, playDescription = 'Play', endIcon, focusRequest, imageFit='cover', focusId }: {
   title: string; subtitle?: string; image?: string | null; icon?: ReactNode;
   actions?: ReactNode; selected?: boolean; disabled?: boolean; onPlay: () => void; editing?: boolean; tintFocus?:boolean;
   playDescription?:string; endIcon?:ReactNode; focusRequest?:number;
+  imageFit?:'contain'|'cover';
+  focusId?:string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -48,8 +50,8 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
     style={{ '--ytm-row-accent':accent !== defaultAccent ? accent : '125,145,165', visibility:paletteResolved ? undefined : 'hidden' } as CSSProperties}
     className={`ytm-media-row${selected ? ' ytm-media-current' : ''}${tintFocus ? ' ytm-library-tint' : ''}`} flow-children="horizontal">
     {editing ? <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div><div className="ytm-media-subtitle">{subtitle}</div></div> :
-    <DialogButton ref={mainRef} className="ytm-button ytm-media-main" style={{ minWidth:0, width:0, flex:'1 1 0', padding:0, margin:0, display:'flex', alignItems:'center', gap:8, height:58, minHeight:58, border:0 }} disabled={disabled} onClick={onPlay} onOKActionDescription={playDescription}>
-      <div className="ytm-media-art">{image ? <img src={image} alt="" loading="lazy" /> : icon || <FaMusic size={20} />}</div>
+    <DialogButton ref={mainRef} data-ytm-focus-id={focusId} className="ytm-button ytm-media-main" style={{ minWidth:0, width:0, flex:'1 1 0', padding:0, margin:0, display:'flex', alignItems:'center', gap:8, height:58, minHeight:58, border:0 }} disabled={disabled} onClick={onPlay} onOKActionDescription={playDescription}>
+      <div className="ytm-media-art">{image ? <img src={image} alt="" loading="lazy" style={{objectFit:imageFit}} /> : icon || <FaMusic size={20} />}</div>
       <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div>
         {subtitle && <div className="ytm-media-subtitle">{subtitle}</div>}</div>
       {endIcon && <span className="ytm-media-end-icon" aria-hidden="true">{endIcon}</span>}

@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'node:http';
+import type { Server, IncomingMessage as HttpIncomingMessage } from 'node:http';
+import { allowedLocalOrigin } from './localOrigin.js';
 
 export type WsEventType =
   | 'track'
@@ -33,7 +34,9 @@ export class WsManager {
   private incomingHandler: IncomingHandler | null = null;
 
   constructor(server: Server) {
-    this.wss = new WebSocketServer({ server });
+    this.wss = new WebSocketServer({ server, maxPayload: 1024 * 1024,
+      verifyClient: (info: {req: HttpIncomingMessage}) => allowedLocalOrigin(info.req.headers.origin),
+    });
 
     this.wss.on('connection', (ws) => {
       this.clients.add(ws);

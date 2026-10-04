@@ -1,7 +1,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import YouTubeCastReceiver from 'yt-cast-receiver';
+import YouTubeCastReceiver, { type DialOptions } from 'yt-cast-receiver';
 import { CastPlayer } from './CastPlayer.js';
 import { JsonDataStore } from './JsonDataStore.js';
 import { WsManager } from './wsManager.js';
@@ -60,15 +60,15 @@ async function main() {
 
   // Create the YouTube Cast Receiver
   const deviceName = (process.env.YTCAST_DEVICE_NAME || os.hostname()).trim() || os.hostname();
+  // Forwarded by the build-time DialServer patch (scripts/cast_receiver_patch.mjs).
+  const dialOptions: Partial<DialOptions> & { uuid: string } = { uuid: ssdpUuid };
   const createReceiver = () => new YouTubeCastReceiver(castPlayer, {
     app: {
       // The library defaults to resetting even on temporary sender loss.
       // Preserve its queue until explicit unlink; our grace handles abandonment.
       resetPlayerOnDisconnectPolicy: 'allExplicitlyDisconnected',
     },
-    dial: {
-      uuid: ssdpUuid,
-    } as any,
+    dial: dialOptions,
     device: {
       name: deviceName,
       screenName: `YouTube on ${deviceName}`,
@@ -297,6 +297,7 @@ async function main() {
   // Receiver events are attached to each instance because explicit Stop
   // rebuilds the receiver to discard its in-memory Cast screen identities.
   const onSenderConnect = (sender: any) => {
+    const connectedReceiver = receiver;
     console.log(`[YTCast] Phone connected: ${sender.name}`);
     wsManager.broadcast('senderConnected', { senderName: sender.name ?? null, avatar:sender.user?.thumbnail ?? null });
     activeSenderName = sender.name ?? null;
@@ -310,11 +311,12 @@ async function main() {
     // our persisted volume. After the connection settles, push our saved
     // volume back to both the phone and the frontend.
     setTimeout(async () => {
-      const savedVol = await dataStore.get<{ level: number; muted: boolean }>('volume');
-      if (savedVol) {
-        console.log(`[YTCast] Restoring persisted volume: ${savedVol.level}`);
-        await castPlayer.setVolume(savedVol);
-      }
+      try {
+        if (shuttingDown || connectedReceiver !== receiver || !receiver.getConnectedSenders().length) return;
+        const savedVol = await dataStore.get<{ level: number; muted: boolean }>('volume');
+        if (shuttingDown || connectedReceiver !== receiver || !receiver.getConnectedSenders().length) return;
+        if (savedVol) await castPlayer.setVolume(savedVol);
+      } catch (error) { console.warn('[YTCast] Could not restore Cast volume:', error); }
     }, 2000);
   };
 
@@ -376,9 +378,10 @@ async function main() {
   };
 
   const attachReceiverEvents = (target: typeof receiver) => {
-    target.on('senderConnect', onSenderConnect);
-    target.on('senderDisconnect', onSenderDisconnect);
-    target.on('error', onReceiverError);
+    // Discard a queued event from the old receiver after an explicit restart.
+    target.on('senderConnect', (sender: any) => { if (!shuttingDown && target === receiver) onSenderConnect(sender); });
+    target.on('senderDisconnect', (sender: any, implicit: boolean) => { if (!shuttingDown && target === receiver) onSenderDisconnect(sender, implicit); });
+    target.on('error', (error: Error) => { if (!shuttingDown && target === receiver) onReceiverError(error); });
   };
   attachReceiverEvents(receiver);
 

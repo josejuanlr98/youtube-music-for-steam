@@ -1,3 +1,4 @@
+import { setBrowseDepth, returnBrowseToPlayer } from '../services/browseNavigation';
 import { call } from '@decky/api';
 import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab } from '@decky/ui';
 import { useEffect, useRef, useState } from 'react';
@@ -13,6 +14,9 @@ import { MediaRow, RowAction } from './MediaRow';
 import { suppressPlaybackNotification } from '../services/notifications';
 import { useI18n } from '../services/i18n';
 import { OverflowText, OverflowTextGroup } from './OverflowText';
+import { cachedPlaylistData, loadPlaylistData } from '../services/playlistData';
+import { resetPaginationScroll, usePaginationFocus } from '../services/pagination';
+import { useBrowseReturn, requestBrowseReturn } from '../services/browseState';
 
 const PAGE_SIZE = 40;
 const timeLabel = (seconds: number) => {
@@ -25,9 +29,11 @@ export const PlaylistPage = () => {
   const playlist = selectedPlaylist();
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const playRef = useRef<HTMLDivElement>(null);
   const [pageFocusRequest, setPageFocusRequest] = useState(0);
-  const [tracks, setTracks] = useState<TrackInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {topNext,topPrevious,focusTop,cancelFocus}=usePaginationFocus(listRef);
+  const [tracks, setTracks] = useState<TrackInfo[]>(()=>playlist?cachedPlaylistData(playlist.playlistId)?.tracks||[]:[]);
+  const [loading, setLoading] = useState(()=>!playlist||!cachedPlaylistData(playlist.playlistId));
   const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -38,25 +44,27 @@ export const PlaylistPage = () => {
   const busy = useRef(false);
   const leaving = useRef(false);
   const accent = useArtworkAccent(playlist?.thumbnail || undefined, rootRef);
+  const browse = useBrowseReturn('playlist:'+playlist?.playlistId,rootRef,listRef,playRef,!loading);
 
   useEffect(() => {
     alive.current = true;
     const id = ++request.current;
-    setTracks([]); setLoading(true); setLoadingMore(false); setPage(0); setError(''); setNotice('');
+    const cached=playlist?cachedPlaylistData(playlist.playlistId):undefined;
+    setTracks(cached?.tracks||[]); setLoading(!cached); setLoadingMore(false); setPage(0); setError(''); setNotice('');
     if (!playlist) { setLoading(false); return; }
     const load = async () => {
       try {
         // The first YouTube Music page appears quickly. The complete list is
         // fetched only after opening this playlist, never for every Library row.
-        const first = await call<[string, number], { tracks?: TrackInfo[]; error?: string }>('get_playlist_tracks', playlist.playlistId, 0);
+        const first = await loadPlaylistData(playlist.playlistId,true);
         if (!alive.current || id !== request.current) return;
         if (first.error) throw new Error(first.error);
         setTracks(first.tracks ?? []);
         setLoading(false);
-        if (playlist.count != null && (first.tracks?.length ?? 0) >= playlist.count) return;
+        if (first.complete || playlist.count != null && (first.tracks?.length ?? 0) >= playlist.count) return;
         setLoadingMore(true);
         try {
-          const complete = await call<[string], { tracks?: TrackInfo[]; error?: string }>('get_playlist_tracks', playlist.playlistId);
+          const complete = await loadPlaylistData(playlist.playlistId);
           if (!alive.current || id !== request.current) return;
           if (complete.error) throw new Error(complete.error);
           if (complete.tracks?.length) setTracks(complete.tracks);
@@ -76,28 +84,28 @@ export const PlaylistPage = () => {
   const back = () => {
     if (leaving.current) return;
     leaving.current = true;
+    requestBrowseReturn(playlist?.parentView);
+    setBrowseDepth((playlist?.returnDepth ?? 1) - 1);
     Navigation.NavigateBack();
+    if (playlist?.origin === 'route') return;
     setTimeout(() => {
       Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
       requestLibraryReturn();
     }, 180);
   };
   const cancelBack = (event: { preventDefault:()=>void; stopPropagation:()=>void }) => { event.preventDefault(); event.stopPropagation(); back(); };
+  useEffect(() => { setBrowseDepth(playlist?.returnDepth ?? 1); }, [playlist]);
   const returnToPlayer = () => {
     if (leaving.current) return;
     leaving.current = true;
-    Navigation.NavigateBack();
-    setTimeout(() => {
-      Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
-      window.dispatchEvent(new Event('ytm-return-player'));
-    }, 180);
+    returnBrowseToPlayer(playlist?.returnDepth ?? 1);
   };
   const actPlaylist = async (mode: PlaylistAction) => {
     if (!playlist || busy.current) return;
     busy.current = true; setPending(`all-${mode}`); setError(''); setNotice('');
     try {
       const result = await performPlaylistAction(playlist.playlistId, mode);
-      if (result.started) returnToPlayer();
+      if (result.started && alive.current) returnToPlayer();
       else if (alive.current) setNotice(`Added ${result.added} songs to the ${result.cast ? 'Cast queue' : 'queue'}.`);
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : 'Could not update the playlist.'); }
     finally { busy.current = false; if (alive.current) setPending(null); }
@@ -111,7 +119,7 @@ export const PlaylistPage = () => {
         if (result.error || !result.url) throw new Error(result.error || 'Could not play this song.');
         suppressPlaybackNotification(song.videoId);
         await playTrack(result);
-        returnToPlayer();
+        if (alive.current) returnToPlayer();
       } else {
         if (getIsCastConnected()) {
           if (mode === 'next') await castRequest('/api/queue/next', song);
@@ -132,16 +140,19 @@ export const PlaylistPage = () => {
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [visiblePage]);
-  const changePage = (direction: number) => {
+  const changePage = (direction: number, fromButton = false) => {
     if (Math.max(0, Math.min(lastPage, visiblePage + direction)) === visiblePage) return;
     setPage(current => Math.max(0, Math.min(lastPage, current + direction)));
-    setPageFocusRequest(current => current + 1);
-    if (listRef.current) listRef.current.scrollTop = 0;
+    if (fromButton) {
+      setPageFocusRequest(0);
+      focusTop(direction);
+    } else {cancelFocus();setPageFocusRequest(current => current + 1);}
+    resetPaginationScroll(listRef.current);
   };
-  const pageControls = () => tracks.length > PAGE_SIZE && <Focusable flow-children="horizontal" className="ytm-playlist-pagination">
-    <DialogButton className="ytm-button" disabled={visiblePage === 0} onClick={() => changePage(-1)}>{t('common.previous')}</DialogButton>
+  const pageControls = (top = false) => tracks.length > PAGE_SIZE && <Focusable flow-children="horizontal" className="ytm-playlist-pagination">
+    <DialogButton ref={top?topPrevious:undefined} className="ytm-button" aria-disabled={visiblePage === 0} disabled={!top && visiblePage === 0} onClick={() => changePage(-1, true)}>{t('common.previous')}</DialogButton>
     <span>{visiblePage + 1}/{lastPage + 1}</span>
-    <DialogButton className="ytm-button" disabled={visiblePage === lastPage} onClick={() => changePage(1)}>{t('common.next')}</DialogButton>
+    <DialogButton ref={top?topNext:undefined} className="ytm-button" aria-disabled={visiblePage === lastPage} disabled={!top && visiblePage === lastPage} onClick={() => changePage(1, true)}>{t('common.next')}</DialogButton>
   </Focusable>;
 
   return <Focusable ref={rootRef} flow-children="vertical" className="ytm-ui ytm-playlist-page"
@@ -158,7 +169,7 @@ export const PlaylistPage = () => {
         <div className="ytm-playlist-cover">{playlist.thumbnail ? <img src={playlist.thumbnail} alt="" /> : <FaMusic size={36} />}</div>
         <div className="ytm-playlist-details"><div className="ytm-eyebrow">{t('playlist.type')}</div><OverflowTextGroup textKey={playlist.playlistId + playlist.title}><h2><OverflowText text={playlist.title} /></h2></OverflowTextGroup><p>{t('common.songs',{count:playlist.count ?? tracks.length})}</p></div>
         <Focusable flow-children="horizontal" className="ytm-playlist-actions" aria-label={t('playlist.actions')}>
-          <DialogButton className="ytm-button" aria-label={t('playlist.playAll')} onOKActionDescription={t('playlist.playAll')} disabled={!!pending} onClick={() => void actPlaylist('play')}><span className="ytm-playlist-action-icon"><MdPlayArrow /></span></DialogButton>
+          <DialogButton ref={playRef} preferredFocus={!browse.returning} className="ytm-button" aria-label={t('playlist.playAll')} onOKActionDescription={t('playlist.playAll')} disabled={!!pending} onClick={() => void actPlaylist('play')}><span className="ytm-playlist-action-icon"><MdPlayArrow /></span></DialogButton>
           <DialogButton className="ytm-button" aria-label={t('playlist.shuffle')} onOKActionDescription={t('playlist.shuffle')} disabled={!!pending} onClick={() => void actPlaylist('shuffle')}><span className="ytm-playlist-action-icon"><IoShuffleOutline /></span></DialogButton>
           <DialogButton className="ytm-button" aria-label={t('playlist.playNext')} onOKActionDescription={t('playlist.playNext')} disabled={!!pending} onClick={() => void actPlaylist('next')}><span className="ytm-playlist-action-icon"><MdPlaylistPlay /></span></DialogButton>
           <DialogButton className="ytm-button" aria-label={t('playlist.addAll')} onOKActionDescription={t('playlist.addAll')} disabled={!!pending} onClick={() => void actPlaylist('append')}><span className="ytm-playlist-action-icon"><MdPlaylistAdd /></span></DialogButton>
@@ -169,15 +180,15 @@ export const PlaylistPage = () => {
       {loading && <div className="ytm-empty" role="status">{t('playlist.opening')}</div>}
       {!loading && !tracks.length && !error && playlist && <div className="ytm-empty">{t('playlist.empty')}</div>}
       {loadingMore && <div className="ytm-collection-note" role="status">{t('playlist.loadingRest')}</div>}
-      {pageControls()}
-      <Focusable ref={listRef} flow-children="vertical" className="ytm-playlist-tracks">
+      {pageControls(true)}
+      <div ref={listRef} className="ytm-playlist-tracks">
         {visibleTracks.map((song, index) => <MediaRow key={`${song.videoId}-${visiblePage * PAGE_SIZE + index}`} image={song.albumArt}
           title={song.title} subtitle={song.artist} disabled={!!pending} focusRequest={index === 0 ? pageFocusRequest : undefined} onPlay={() => void actSong(song, 'play')}
           actions={<><span className="ytm-track-duration">{timeLabel(song.duration)}</span>
             <RowAction label={t('playlist.playNext')} disabled={!!pending} onClick={() => void actSong(song, 'next')}><MdPlaylistPlay size={21} /></RowAction>
             <RowAction label={t('playlist.addQueue')} disabled={!!pending} onClick={() => void actSong(song, 'append')}><MdPlaylistAdd size={21} /></RowAction></>} />)}
         {pageControls()}
-      </Focusable>
+      </div>
     </Focusable>
   </Focusable>;
 };

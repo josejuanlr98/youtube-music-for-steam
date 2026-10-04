@@ -10,6 +10,7 @@ function load(name, modules, globals = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText;
   vm.runInNewContext(source, { exports, require: name => {
+    if (name === '../services/lyricColor') return load('src/services/lyricColor.ts', {});
     if (name in modules) return modules[name];
     throw Error(`Unexpected import: ${name}`);
   }, console, AbortController, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
@@ -93,7 +94,7 @@ function lyricsTests() {
   const jsx = (type, props) => ({ type, props });
   const elements = load('src/components/LyricsPage.tsx', {
     'react/jsx-runtime': { jsx, jsxs:jsx },
-    'react': { useState: value => [typeof value === 'function' ? value() : value, () => {}], useEffect() {}, useRef:() => ({ current:refs++ === 0 ? scroll : null }) },
+    'react': { useState: value => [typeof value === 'function' ? value() : value, () => {}], useEffect() {}, useRef:() => ({ current:refs++ === 0 ? scroll : refs===2 ? {scroll:distance=>{scroll.scrollTop+=distance;}} : null }) },
     '@decky/ui': { DialogButton:'button', Focusable:'div', GamepadButton:{ DIR_UP:9, DIR_DOWN:10, BUMPER_LEFT:5, BUMPER_RIGHT:6 }, Navigation:{ NavigateBack() { back++; }, OpenQuickAccessMenu() {} }, QuickAccessTab:{ Decky:1 } },
     'react-icons/fa': { FaArrowLeft:'i', FaChevronUp:'i', FaChevronDown:'i', FaMusic:'i', FaExpand:'i' },
     '../services/audioManager': { getIsCastConnected:()=>false, getCastSenderName:()=>null, addCastConnectionListener:()=>()=>{}, getCurrentTrack:() => ({ videoId:'test', title:'Test', artist:'Artist' }), addTrackChangeListener:() => () => {}, addProgressListener:() => () => {}, getProgress:() => ({ position:0 }) },
@@ -102,6 +103,7 @@ function lyricsTests() {
     '../services/focus': { focusLyricsReader:() => () => {} },
     'react-icons/md':{}, 'react-icons/si': { SiYoutubemusic:'icon' },
     '../services/lyricsScroll': {}, '../services/syncedLyrics': {},
+    '../services/readerScroll': {createReaderScroller:()=>({scroll:distance=>{scroll.scrollTop+=distance;},dispose(){}})},
     '../services/notifications': {},
     '../services/i18n': { useI18n:() => ({ t:key => ({'lyrics.region':'Song lyrics','lyrics.loading':'Loading lyrics…','lyrics.title':'Lyrics','lyrics.fullscreen':'Fullscreen','common.retry':'Retry'}[key] || key) }) },
     '../services/artworkPalette': { useArtworkPalette:() => ['180,202,220','72,101,137','43,66,96'] },
@@ -115,7 +117,7 @@ function lyricsTests() {
   const walk = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(walk)];
   const nodes = walk(root);
   const reader = nodes.find(node => node.props['aria-label'] === 'Song lyrics');
-  reader.props.onGamepadDirection(event(10)); assert.equal(scroll.scrollTop, 64);
+  reader.props.onGamepadDirection(event(10)); assert.equal(scroll.scrollTop, 80);
   reader.props.onGamepadDirection(event(9)); assert.equal(scroll.scrollTop, 0);
   root.props.onButtonDown(event(6)); assert.equal(scroll.scrollTop, 0);
   root.props.onButtonDown(event(5)); assert.equal(scroll.scrollTop, 0);

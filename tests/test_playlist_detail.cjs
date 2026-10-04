@@ -16,7 +16,7 @@ function load(file, modules = {}, globals = {}) {
 
 const events = [];
 const navigation = load('src/services/playlistNavigation.ts', {}, {
-  window:{ dispatchEvent:event => events.push(event.type) }, Event:class { constructor(type) { this.type = type; } },
+  window:{ dispatchEvent:event => events.push(event.type) }, Event:class { constructor(type) { this.type = type; } }, CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},
 });
 navigation.selectPlaylist({ playlistId:'summer', title:'Summer', count:80, thumbnail:null, libraryScrollTop:420 });
 assert.equal(navigation.selectedPlaylist().playlistId, 'summer');
@@ -27,6 +27,11 @@ assert.equal(navigation.consumeLibraryReturn().libraryScrollTop, 420);
 assert.equal(navigation.consumeLibraryReturn(), null, 'return position is consumed once');
 navigation.selectPlaylist({ playlistId:'winter', title:'Winter', count:12, thumbnail:null, libraryScrollTop:0 });
 assert.equal(navigation.libraryReturnPending(), false, 'opening another playlist clears the old return request');
+navigation.requestLibraryTabReturn();
+assert.equal(navigation.libraryReturnPending(),true,'catalogue return survives a panel remount');
+assert.equal(navigation.consumeLibraryReturn(),null,'catalogue return never restores an unrelated playlist');
+navigation.consumeLibraryTabReturn();
+assert.equal(navigation.libraryReturnPending(),false,'the mounted tab consumes only its catalogue return');
 
 (async () => {
   const calls = [], casts = [], played = [];

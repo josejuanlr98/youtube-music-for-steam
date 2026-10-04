@@ -1,6 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { CastPlayer } from './CastPlayer.js';
 import type { Player as YtPlayer } from 'yt-cast-receiver';
+import { allowedLocalOrigin } from './localOrigin.js';
+
+class RequestError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); }
+}
+
+function finiteNumber(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new RequestError(`Invalid ${name}`);
+  return value;
+}
 
 interface NetworkSnapshot {
   uuid: string | null;
@@ -88,20 +98,21 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     },
 
     '/api/seek': async (body, ctx) => {
-      const position = body?.position ?? 0;
+      const position = finiteNumber(body?.position, 'position');
+      if (position < 0) throw new RequestError('Position must be non-negative');
       await ctx.libraryPlayer.seek(position);
       return { ok: true };
     },
 
     '/api/volume': async (body, ctx) => {
-      const level = body?.volume ?? 100;
+      const level = Math.max(0, Math.min(100, finiteNumber(body?.volume, 'volume')));
       await ctx.libraryPlayer.setVolume({ level, muted:false });
       return { ok: true };
     },
 
     '/api/queue/jump': async (body, ctx) => {
       const videoId = body?.videoId;
-      if (!videoId) return { ok: false, message: 'Missing videoId' };
+      if (typeof videoId !== 'string' || !/^[\w-]{1,64}$/.test(videoId)) throw new RequestError('Invalid videoId');
       if (body?.expectedIds) {
         const ids = ctx.castPlayer.getQueueWithMetadata().tracks.map(t => t.videoId);
         if (!Array.isArray(body.expectedIds) || JSON.stringify(body.expectedIds) !== JSON.stringify(ids) ||
@@ -146,32 +157,37 @@ const routes: Record<string, Record<string, RouteHandler>> = {
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
 
 function parseBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (req.method === 'GET') {
       resolve({});
       return;
     }
 
     let body = '';
+    let size = 0;
     let oversized = false;
-    req.on('error', () => resolve({}));
+    req.on('error', reject);
     req.on('data', (chunk: Buffer) => {
       if (oversized) return;
-      body += chunk.toString();
-      if (body.length > MAX_BODY_SIZE) {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
         oversized = true;
-        body = ''; // Free memory
+        body = ''; // Free memory and reject before the sender finishes uploading.
+        req.pause();
+        reject(new RequestError('Request body too large', 413));
+        return;
       }
+      body += chunk.toString();
     });
     req.on('end', () => {
       if (oversized) {
-        resolve({});
+        reject(new RequestError('Request body too large', 413));
         return;
       }
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch {
-        resolve({});
+        reject(new RequestError('Invalid JSON'));
       }
     });
   });
@@ -185,8 +201,14 @@ export function handleRequest(
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
 
-  // CORS headers for local requests
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (!allowedLocalOrigin(origin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Origin not allowed' }));
+    return;
+  }
+  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -205,13 +227,16 @@ export function handleRequest(
   }
 
   void parseBody(req).then(async (body) => {
-    try {
-      const result = await handler(body, ctx);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: (err as Error).message }));
+    const result = await handler(body, ctx);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }).catch((err) => {
+    if (err instanceof RequestError && err.status === 413) {
+      // Node closes a Connection: close response after flushing it. Destroying
+      // the request here would reset the socket before clients receive the 413.
+      res.setHeader('Connection', 'close');
     }
+    res.writeHead(err instanceof RequestError ? err.status : 500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
   });
 }

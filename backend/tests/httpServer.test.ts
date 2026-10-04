@@ -6,6 +6,7 @@ function createMockReq(method: string, url: string, body?: any): any {
   const req = new EventEmitter();
   (req as any).method = method;
   (req as any).url = url;
+  (req as any).headers = {};
 
   if (body) {
     setTimeout(() => {

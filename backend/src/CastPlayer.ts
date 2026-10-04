@@ -26,7 +26,7 @@ export class CastPlayer extends Player {
   private playbackId: string | null = null;
   private endedPlaybackId: string | null = null;
   private retryingPlaybackId: string | null = null;
-  private retriedPlaybackId: unknown = null;
+  private retriedPlaybackId: string | null = null;
   private failedTracks = 0;
   private lastSenderSync = 0;
   private lastProgressSync = 0;
@@ -42,7 +42,7 @@ export class CastPlayer extends Player {
     this.progressHeartbeat = setInterval(() => {
       // Bridge short overlay throttling only. Never invent indefinite playback.
       if (!this.playing || this.sessionCleared || Date.now() - this.lastAudioReport > 15000) {
-        if (this.playing && this.lastAudioReport) this.currentPosition = Math.min(this.currentDuration || Infinity, this.currentPosition + 15);
+        this.currentPosition = this.estimatedPosition();
         this.stopHeartbeat(); return;
       }
       void this.syncSender(this.playbackId).catch(err => console.warn('[YTCast] Heartbeat failed:', err));
@@ -252,7 +252,7 @@ export class CastPlayer extends Player {
    */
   getPlaybackId(): string | null { return this.playbackId; }
 
-  private matchesPlayback(id: unknown): boolean {
+  private matchesPlayback(id: unknown): id is string {
     return typeof id === 'string' && id === this.playbackId &&
       !this.sessionCleared && !!this.currentTrackInfo;
   }
@@ -664,10 +664,14 @@ export class CastPlayer extends Player {
     return this.currentVolume;
   }
 
-  protected async doGetPosition(): Promise<number> {
+  private estimatedPosition(): number {
     if (!this.playing || !this.lastAudioReport) return this.currentPosition;
     const delta = Math.min(15, Math.max(0, (Date.now() - this.lastAudioReport) / 1000));
     return Math.min(this.currentDuration || Infinity, this.currentPosition + delta);
+  }
+
+  protected async doGetPosition(): Promise<number> {
+    return this.estimatedPosition();
   }
 
   protected async doGetDuration(): Promise<number> {

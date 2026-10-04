@@ -1,16 +1,17 @@
 {
   "name": "decky-youtube-music-cast",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "description": "YouTube Music player and Cast receiver for SteamOS handhelds and PCs.",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "test": "node tests/test_cast_lifecycle.cjs && node tests/test_054.cjs && node tests/test_notifications.cjs && node tests/test_cast_only.cjs && node tests/test_cast_transport.cjs && node tests/test_fullscreen.cjs && node tests/test_lyrics_scroll.cjs && node tests/test_synced_lyrics.cjs && node tests/test_artwork_palette.cjs && node tests/test_view_theme.cjs && node tests/test_artwork_motion.cjs && node tests/test_playlist_detail.cjs",
+    "test": "node tests/test_cast_lifecycle.cjs && node tests/test_054.cjs && node tests/test_notifications.cjs && node tests/test_cast_only.cjs && node tests/test_cast_transport.cjs && node tests/test_fullscreen.cjs && node tests/test_lyrics_scroll.cjs && node tests/test_synced_lyrics.cjs && node tests/test_artwork_palette.cjs && node tests/test_view_theme.cjs && node tests/test_artwork_motion.cjs && node tests/test_playlist_detail.cjs && node tests/test_070.cjs && node tests/test_catalog_ui.cjs && node tests/test_browse_polish.cjs && node tests/test_reader_follow.cjs && node tests/test_iteration_polish.cjs && node tests/test_review_hardening.cjs && node tests/test_pagination_focus.cjs && node tests/test_browse_return.cjs",
     "test:python": "python -m unittest discover -s tests -v",
-    "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --outfile=backend/out/server.cjs --external:bufferutil --external:utf-8-validate",
+    "build:backend": "node scripts/build_backend.mjs",
     "package": "powershell -ExecutionPolicy Bypass -File build.ps1",
-    "package:source": "python scripts/package_source.py --source . --output outputs/youtube-music-for-steam-0.6.9-source.zip --version 0.6.9"
+    "package:source": "python scripts/package_source.py --source . --output outputs/youtube-music-for-steam-0.7.0-source.zip --version 0.7.0",
+    "typecheck:backend": "node scripts/check_backend_types.mjs"
   },
   "keywords": [
     "decky",

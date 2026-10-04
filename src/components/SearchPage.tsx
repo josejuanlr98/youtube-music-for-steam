@@ -1,85 +1,98 @@
-import { DialogButton, TextField, Focusable, Navigation, QuickAccessTab } from '@decky/ui';
-import { call } from '@decky/api';
+import { setBrowseDepth, returnBrowseToPlayer, returnBrowseToLibrary } from '../services/browseNavigation';
+import { DialogButton, TextField, Focusable, GamepadButton } from '@decky/ui';
 import { useEffect, useRef, useState } from 'react';
 import { FaSearch, FaArrowLeft } from 'react-icons/fa';
-import { MdPlaylistPlay, MdPlaylistAdd } from 'react-icons/md';
-import { playTrack, getIsCastConnected, castRequest, type TrackInfo } from '../services/audioManager';
 import { ThemeScope } from './ThemeScope';
-import { MediaRow, RowAction } from './MediaRow';
+import { CatalogFilters, CatalogList } from './CatalogList';
+import { actCatalogSong, actCatalogCollection, searchCatalog, openCatalog, type CatalogEntry, type CatalogFilter } from '../services/catalog';
 import { useI18n } from '../services/i18n';
-interface SearchResult { videoId: string; title: string; artist: string; albumArt: string; duration: string }
-export const SearchPage = () => {
-  const { t } = useI18n();
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [loadingSong, setLoadingSong] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const [queued, setQueued] = useState<string | null>(null);
-  const [hasSearched, setHasSearched] = useState(false);
-  const busy = useRef(false), request = useRef(0), alive = useRef(true);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
-  const handleSearch = async () => {
-    if (!query.trim()) return;
-    const id = ++request.current;
-    setError(''); setSearching(true); setHasSearched(true); setQueued(null);
-    try {
-      const result = await call<[string], { results?: SearchResult[]; error?: string }>('search_songs', query.trim());
-      if (!alive.current || id !== request.current) return;
-      if (result.error) { setError(result.error); setResults([]); }
-      else setResults(result.results ?? []);
-    } catch { if (alive.current && id === request.current) setError('Search could not connect. Please retry.'); }
-    finally { if (alive.current && id === request.current) setSearching(false); }
+import { resetPaginationScroll, usePaginationFocus } from '../services/pagination';
+import { getSearchState, saveSearchState } from '../services/searchState';
+import { useBrowseReturn, requestBrowseReturn } from '../services/browseState';
+export { clearSearchState } from '../services/searchState';
+
+export const SearchPage=()=>{
+  const {t}=useI18n();
+  const snapshot=getSearchState();
+  const [query,setQuery]=useState(snapshot.query),[filter,setFilter]=useState(snapshot.filter);
+  const [entries,setEntries]=useState(snapshot.entries),[hasSearched,setHasSearched]=useState(snapshot.searched);
+  const [searching,setSearching]=useState(false),[pending,setPending]=useState<string|null>(null);
+  const [error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [page,setPage]=useState(snapshot.page),[focus,setFocus]=useState(0);
+  const list=useRef<HTMLDivElement>(null);
+  const root=useRef<HTMLDivElement>(null);
+  const {topNext,topPrevious,focusTop,cancelFocus}=usePaginationFocus(list);
+  const busy=useRef(false),request=useRef(0),alive=useRef(true),leaving=useRef(false);
+  const browse=useBrowseReturn('search',root,list,undefined,!searching,entries);
+  const back=()=>{if(leaving.current)return;leaving.current=true;requestBrowseReturn(snapshot.parentView);returnBrowseToLibrary(1);};
+  const cancel=(event:{preventDefault:()=>void;stopPropagation:()=>void})=>{event.preventDefault();event.stopPropagation();back();};
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;request.current++;};},[]);
+  useEffect(()=>{saveSearchState({query,filter,entries,searched:hasSearched,page,parentView:snapshot.parentView});},[query,filter,entries,hasSearched,page]);
+  useEffect(() => { setBrowseDepth(1); }, []);
+  const search=async(value:CatalogFilter=filter)=>{
+    if(!query.trim())return;
+    const id=++request.current;
+    setSearching(true);setError('');setNotice('');setHasSearched(true);
+    // Do not show a previous category under the newly selected filter.
+    setEntries([]);setPage(0);setFocus(0);
+    try{
+      const result=await searchCatalog(query.trim(),value);
+      if(!alive.current||id!==request.current)return;
+      setEntries(result.entries||[]);setError(result.error||'');
+    }catch{if(alive.current&&id===request.current)setError(t('catalog.connectionError'));}
+    finally{if(alive.current&&id===request.current)setSearching(false);}
   };
-  const act = async (song: SearchResult, mode: 'play' | 'next' | 'append') => {
-    if (busy.current) return;
-    busy.current = true; setLoadingSong(song.videoId); setError(''); setQueued(null);
-    try {
-      if (mode !== 'play') {
-        if (getIsCastConnected()) {
-          if (mode === 'next') await castRequest('/api/queue/next', song);
-          else {
-            const duration = song.duration.split(':').reduce((total, part) => total * 60 + (Number(part) || 0), 0);
-            await castRequest('/api/queue/append', { tracks:[{ ...song, duration }] });
-          }
-        }
-        else {
-          const result = await call<[SearchResult], {success?:boolean;error?:string}>(mode === 'next' ? 'queue_song_next' : 'queue_song_append', song);
-          if (!result.success) throw new Error(result.error || 'Could not queue song.');
-        }
-        if (alive.current) setQueued(`${mode === 'next' ? 'Up next' : 'Added to queue'}: ${song.title}`);
-      } else {
-        const result = await call<[string, SearchResult], TrackInfo & {error?:string}>('play_song', song.videoId, song);
-        if (result.error || !result.url) throw new Error(result.error || 'Could not play this song.');
-        await playTrack(result);
-        if (alive.current) { Navigation.NavigateBack(); Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky); }
-      }
-    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Could not complete this action.'); }
-    finally { busy.current = false; if (alive.current) setLoadingSong(null); }
+  const act=async(entry:CatalogEntry,mode:'play'|'shuffle'|'next'|'append')=>{
+    if(busy.current)return;
+    busy.current=true;setPending(entry.id);setError('');setNotice('');
+    try{
+      if(entry.kind==='song')await actCatalogSong(entry,mode==='shuffle'?'play':mode);
+      else await actCatalogCollection(entry,mode);
+      if(!alive.current)return;
+      if(mode==='play'||mode==='shuffle'){
+        returnBrowseToPlayer(1);
+      }else setNotice(t('catalog.queued'));
+    }catch(cause){if(alive.current)setError(cause instanceof Error?cause.message:t('catalog.connectionError'));}
+    finally{busy.current=false;if(alive.current)setPending(null);}
   };
-  return <Focusable flow-children="vertical" className="ytm-ui ytm-search-page" onCancelButton={() => Navigation.NavigateBack()} onCancelActionDescription={t('common.back')}>
-    <ThemeScope />
+  const lastPage=Math.max(0,Math.ceil(entries.length/40)-1),visiblePage=Math.min(page,lastPage);
+  const changePage=(direction:number,fromButton=false)=>{
+    const next=Math.max(0,Math.min(lastPage,visiblePage+direction));
+    if(next===visiblePage)return;
+    setPage(next);
+    resetPaginationScroll(list.current);
+    if(fromButton){setFocus(0);focusTop(direction);}
+    else {cancelFocus();setFocus(value=>value+1);}
+  };
+  const pagination=(top=false)=>lastPage>0&&<Focusable className="ytm-playlist-pagination" flow-children="horizontal">
+    <DialogButton ref={top?topPrevious:undefined} className="ytm-button" aria-disabled={visiblePage===0} disabled={!top&&visiblePage===0} onClick={()=>changePage(-1,true)}>{t('common.previous')}</DialogButton>
+    <span>{visiblePage+1}/{lastPage+1}</span>
+    <DialogButton ref={top?topNext:undefined} className="ytm-button" aria-disabled={visiblePage===lastPage} disabled={!top&&visiblePage===lastPage} onClick={()=>changePage(1,true)}>{t('common.next')}</DialogButton>
+  </Focusable>;
+  return <Focusable ref={root} flow-children="vertical" className="ytm-ui ytm-search-page" onCancel={cancel} onCancelButton={cancel} onCancelActionDescription={t('common.back')} onButtonDown={event=>{
+    if(event.detail.is_repeat)return;
+    const direction=event.detail.button===GamepadButton.TRIGGER_LEFT?-1:event.detail.button===GamepadButton.TRIGGER_RIGHT?1:0;
+    if(direction&&lastPage){event.preventDefault();event.stopPropagation();changePage(direction);}
+  }}>
+    <ThemeScope/>
     <Focusable flow-children="vertical" className="ytm-search-content">
       <div className="ytm-search-header"><div><div className="ytm-eyebrow">{t('search.eyebrow')}</div><h2>{t('search.title')}</h2></div>
-        <DialogButton className="ytm-button" onClick={() => Navigation.NavigateBack()}><FaArrowLeft /> {t('search.back')}</DialogButton></div>
+        <DialogButton className="ytm-button" onClick={back}><FaArrowLeft/> {t('common.back')}</DialogButton></div>
       <Focusable flow-children="horizontal" className="ytm-search-form">
-        <div className="ytm-search-input"><TextField value={query} onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSearch(); } }} /></div>
-        <DialogButton className="ytm-button" disabled={searching || !query.trim()} onClick={() => void handleSearch()}><FaSearch style={{color:'#fff'}} /> {searching ? t('common.loading') : t('search.button')}</DialogButton>
+        <div className="ytm-search-input"><TextField focusOnMount={!browse.returning} value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void search();}}}/></div>
+        <DialogButton className="ytm-button" disabled={searching||!query.trim()} onClick={()=>void search()}><FaSearch/> {searching?t('common.loading'):t('search.button')}</DialogButton>
       </Focusable>
-      {error && <div role="alert" className="ytm-error">{error}</div>}
-      {queued && <div role="status" className="ytm-collection-note">{queued}</div>}
-      <Focusable flow-children="vertical" className="ytm-search-results">
-        {!hasSearched && <div className="ytm-empty">{t('search.hint')}</div>}
-        {hasSearched && !searching && !results.length && !error && <div className="ytm-empty">{t('search.empty')}</div>}
-        {results.map((song, index) => <MediaRow key={`${song.videoId}-${index}`} image={song.albumArt}
-          title={loadingSong === song.videoId ? t('common.loading') : song.title} subtitle={song.artist}
-          disabled={!!loadingSong} onPlay={() => void act(song, 'play')} actions={<>
-            <span className="ytm-track-duration">{song.duration}</span>
-            <RowAction label={t('playlist.playNext')} disabled={!!loadingSong} onClick={() => void act(song, 'next')}><MdPlaylistPlay size={22} /></RowAction>
-            <RowAction label={t('playlist.addQueue')} disabled={!!loadingSong} onClick={() => void act(song, 'append')}><MdPlaylistAdd size={22} /></RowAction>
-          </>} />)}
-      </Focusable>
+      <CatalogFilters value={filter} onChange={value=>{cancelFocus();setFilter(value);setPage(0);if(query.trim())void search(value);}}/>
+      {error&&<div role="alert" className="ytm-error">{error}</div>}
+      {notice&&<div role="status" className="ytm-collection-note">{notice}</div>}
+      {pagination(true)}
+      <div ref={list} className="ytm-search-results">
+        {!hasSearched&&<div className="ytm-empty">{t('catalog.searchHint')}</div>}
+        {searching&&<div role="status" className="ytm-empty">{t('common.loading')}</div>}
+        {hasSearched&&!searching&&!entries.length&&!error&&<div className="ytm-empty">{t('catalog.empty')}</div>}
+        <CatalogList entries={entries.slice(visiblePage*40,(visiblePage+1)*40)} pending={pending} focusRequest={focus} onOpen={entry=>openCatalog(entry,'route',browse.capture({filter,page:visiblePage},'entry:'+entry.kind+':'+entry.id))} onSong={(entry,mode)=>void act(entry,mode)} onCollection={(entry,mode)=>void act(entry,mode)}/>
+        {pagination()}
+      </div>
     </Focusable>
   </Focusable>;
 };

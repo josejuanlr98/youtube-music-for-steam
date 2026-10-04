@@ -6,7 +6,9 @@ const effects = [];
 let resolveLock, released = 0, unblocked = 0, requests = 0, backs = 0, reopened = 0, returned = 0;
 let next = 0, previous = 0, toggled = 0;
 const document = {visibilityState:'visible', addEventListener(){}, removeEventListener(){}};
+const color={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/lyricColor.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:color});
 const modules = {
+ '../services/lyricColor':color,
  'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},
  'react':{useState:v=>[typeof v==='function'?v():v,()=>{}],useRef:()=>({current:null}),useEffect:fn=>effects.push(fn)},
  '@decky/ui':{Focusable:'div',DialogButton:'button',Navigation:{NavigateBack(){backs++},OpenQuickAccessMenu(){reopened++}},GamepadButton:{BUMPER_LEFT:5,BUMPER_RIGHT:6,DIR_UP:9,DIR_DOWN:10},QuickAccessTab:{Decky:1}},
@@ -36,7 +38,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/components/LyricsPage
  assert.equal(nodes(root).some(n=>n.type==='button' && n.props.preferredFocus),false,'fullscreen has no Exit button');
  assert.equal(root.props.preferredFocus,true,'initial focus belongs to fullscreen controls');
  root.props.onOKButton(event(1)); assert.equal(toggled,2); assert.equal(backs,0,'A on initial focus pauses instead of exiting');
- const cleanup=effects[5]();
+ const cleanup=effects.find(effect=>effect.toString().includes('acquireWakeLock'))();
  assert.equal(requests,1);
  cleanup(); assert.equal(unblocked,1);
  resolveLock({release:async()=>{released++}});

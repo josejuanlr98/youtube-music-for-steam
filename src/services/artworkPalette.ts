@@ -9,6 +9,16 @@ export const defaultAccent = '78, 108, 132';
 export type ArtworkPalette = [string, string, string];
 export const defaultPalette: ArtworkPalette = [defaultAccent, '54, 74, 92', '34, 47, 61'];
 const cache = new Map<string, ArtworkPalette>();
+const PALETTE_STORAGE = 'ytm-artwork-palettes-v2';
+try {
+  const saved = JSON.parse(localStorage.getItem(PALETTE_STORAGE) || '[]');
+  if (Array.isArray(saved)) for (const [url, colors] of saved.slice(-64)) {
+    if (typeof url === 'string' && Array.isArray(colors) && colors.length === 3 &&
+      colors.every(color => typeof color === 'string' && /^\d{1,3},\s*\d{1,3},\s*\d{1,3}$/.test(color) && color.split(',').every(value => Number(value) <= 255)))
+      cache.set(url, colors as ArtworkPalette);
+  }
+} catch { /* Invalid or unavailable storage is ignored. */ }
+export const artworkPaletteReady = (url?:string) => !url || cache.has(url);
 const pendingPalettes = new Map<string, Promise<ArtworkPalette>>();
 const localArtwork = new Map<string, Promise<string | undefined>>();
 export function loadLocalArtwork(url: string): Promise<string | undefined> {
@@ -28,7 +38,8 @@ export function extractPalette(pixels: Uint8ClampedArray): ArtworkPalette {
   let opaquePixels = 0;
   let luminanceTotal = 0;
   for (let i = 0; i < pixels.length; i += 4) {
-    const [r, g, b, a] = pixels.subarray(i, i + 4);
+    // Avoid allocating a typed-array view for each sampled pixel.
+    const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3];
     if (a < 128) continue;
     opaquePixels++;
     luminanceTotal += r * .2126 + g * .7152 + b * .0722;
@@ -154,10 +165,11 @@ export function preloadArtworkPalette(original: string, doc: Document): Promise<
   let pending = pendingPalettes.get(original);
   if (!pending) {
     pending = artworkPalette(original, doc).then(color => {
-      if (color !== defaultPalette) {
-        if (cache.size >= 128) cache.delete(cache.keys().next().value!);
-        cache.set(original, color);
-      }
+      if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+      cache.set(original, color);
+      if (color !== defaultPalette) try {
+        localStorage.setItem(PALETTE_STORAGE, JSON.stringify([...cache].filter(([,palette]) => palette !== defaultPalette).slice(-64)));
+      } catch { /* Session cache still works without persistent storage. */ }
       return color;
     }).finally(() => pendingPalettes.delete(original));
     pendingPalettes.set(original, pending);

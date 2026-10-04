@@ -47,9 +47,88 @@ Object.assign(dictionaries.es, {
   'settings.accountTitle':'Tu cuenta','settings.importTitle':'Importar desde Firefox o un navegador derivado','settings.importHint':'Para importar automáticamente, inicia sesión en music.youtube.com desde Firefox, Zen, LibreWolf, Waterfox o Floorp en modo escritorio y cierra el navegador. Tu sesión guardada solo se reemplaza después de validarla.','settings.supported':'Navegadores compatibles','settings.manualAvailable':'También puedes importar las cabeceras de forma manual en Configuración avanzada.','settings.import':'Importar cookies','settings.importing':'Importando…','settings.authenticated':'Sesión iniciada ✓','settings.signOut':'Cerrar sesión','settings.castOnlyHint':'Puedes usar Cast sin iniciar sesión. Agrega tu cuenta para usar biblioteca, búsqueda, Me gusta y letras.','settings.hideManual':'Ocultar importación manual','settings.showManual':'Avanzado: importar cabeceras manualmente','settings.manual1':'1. Abre music.youtube.com, inicia sesión y presiona F12 para abrir las herramientas de desarrollo.','settings.manual2':'2. En Red (Network), abre Biblioteca para generar nuevas solicitudes.','settings.manual3':'3. Busca una solicitud POST exitosa llamada browse (estado 200).','settings.manual4':'4. Haz clic derecho en la solicitud → Copiar → Copiar cabeceras de la solicitud.','settings.manual5':'5. Pega las cabeceras en un archivo de texto llamado yt-music-headers.txt. No las modifiques.','settings.manual6':'6. Guarda o transfiere el archivo a /home/deck/yt-music-headers.txt.','settings.manual7':'7. Confirma la ruta y elige Cargar y conectar.','settings.loadConnect':'Cargar y conectar','settings.castTitle':'Escucha desde tu teléfono','settings.deviceName':'Nombre del dispositivo Cast','settings.saveDeviceName':'Guardar nombre','settings.advertised':'Nombre visible: {name}','settings.castHint':'En YouTube o YouTube Music de tu teléfono, selecciona tu Deck como dispositivo Cast. Usa Detener en el reproductor para terminar la sesión.','settings.network':'Red actual','settings.notDetected':'No detectada','settings.trust':'Confiar en esta red','settings.untrust':'Desactivar Cast en esta red','settings.castEnabled':'El receptor Cast está activo en esta red ✓','settings.restartHint':'Reinicia si el progreso del teléfono no coincide con el plugin o si el teléfono se queda cargando sin iniciar Cast. Después, vuelve a conectarlo.','settings.restart':'Reiniciar receptor Cast',
 });
 
+const catalogText:Record<string,string[]>={
+  en:['All','Songs','Playlists','Albums','Artists','Singles & EPs','Song','Playlist','Album','Artist','Filter library','Open','Play song','Added to queue','Load more','No results available.','Search songs, albums, artists or playlists.','Browse your music','Could not connect. Please retry.','Translating…','Retry translation'],
+  es:['Todo','Canciones','Playlists','Álbumes','Artistas','Sencillos y EPs','Canción','Playlist','Álbum','Artista','Filtrar biblioteca','Abrir','Reproducir canción','Agregado a la cola','Cargar más','No hay resultados disponibles.','Busca canciones, álbumes, artistas o playlists.','Explora tu música','No se pudo conectar. Intenta de nuevo.','Traduciendo…','Reintentar traducción'],
+  fr:['Tout','Titres','Playlists','Albums','Artistes','Singles et EP','Titre','Playlist','Album','Artiste','Filtrer la bibliothèque','Ouvrir','Lire le titre','Ajouté à la file','Charger plus','Aucun résultat disponible.','Recherchez des titres, albums, artistes ou playlists.','Explorez votre musique','Connexion impossible. Réessayez.','Traduction…','Réessayer la traduction'],
+  de:['Alle','Titel','Playlists','Alben','Künstler','Singles und EPs','Titel','Playlist','Album','Künstler','Bibliothek filtern','Öffnen','Titel abspielen','Zur Warteschlange hinzugefügt','Mehr laden','Keine Ergebnisse verfügbar.','Suche Titel, Alben, Künstler oder Playlists.','Musik entdecken','Verbindung fehlgeschlagen. Bitte erneut versuchen.','Übersetzung…','Übersetzung wiederholen'],
+  pt:['Tudo','Músicas','Playlists','Álbuns','Artistas','Singles e EPs','Música','Playlist','Álbum','Artista','Filtrar biblioteca','Abrir','Reproduzir música','Adicionado à fila','Carregar mais','Nenhum resultado disponível.','Pesquise músicas, álbuns, artistas ou playlists.','Explore sua música','Falha na conexão. Tente novamente.','Traduzindo…','Tentar tradução novamente'],
+  it:['Tutto','Brani','Playlist','Album','Artisti','Singoli ed EP','Brano','Playlist','Album','Artista','Filtra libreria','Apri','Riproduci brano','Aggiunto alla coda','Carica altro','Nessun risultato disponibile.','Cerca brani, album, artisti o playlist.','Esplora la tua musica','Connessione non riuscita. Riprova.','Traduzione…','Riprova traduzione'],
+  ja:['すべて','曲','プレイリスト','アルバム','アーティスト','シングルとEP','曲','プレイリスト','アルバム','アーティスト','ライブラリを絞り込む','開く','曲を再生','キューに追加しました','さらに読み込む','結果がありません。','曲、アルバム、アーティスト、プレイリストを検索。','音楽を探す','接続できません。再試行してください。','翻訳中…','翻訳を再試行'],
+};
+const catalogKeys=['all','songs','playlists','albums','artists','singles','song','playlist','album','artist','filter','open','playSong','queued','more','empty','searchHint','browse','connectionError'];
+for(const [locale,labels] of Object.entries(catalogText)){
+  const target=locale==='en'?en:dictionaries[locale as keyof typeof dictionaries];
+  catalogKeys.forEach((key,index)=>{target['catalog.'+key]=labels[index];});
+  target['lyrics.translating']=labels[19];target['lyrics.retryTranslation']=labels[20];
+}
+const catalogExtras:Record<string,string[]>={
+  en:['Related artists','Loading more of your library…','Off by default. Lyrics are sent to MyMemory, with Apertium as a fallback for supported languages. Cookies are never sent. Free services have availability and accuracy limits.'],
+  es:['Artistas similares','Cargando más de tu biblioteca…','Desactivado por defecto. Las letras se envían a MyMemory, con Apertium como respaldo para idiomas compatibles. Nunca se envían tus cookies. Los servicios gratuitos tienen límites de disponibilidad y precisión.'],
+  fr:['Artistes similaires','Chargement de la bibliothèque…','Désactivé par défaut. Les paroles sont envoyées à MyMemory, avec Apertium en secours pour les langues prises en charge. Aucun cookie n’est envoyé. Les services gratuits ont des limites de disponibilité et de précision.'],
+  de:['Ähnliche Künstler','Weitere Bibliothekseinträge werden geladen…','Standardmäßig aus. Texte werden an MyMemory gesendet; Apertium unterstützt als Ersatz einige Sprachen. Cookies werden nie gesendet. Kostenlose Dienste sind nicht immer verfügbar oder genau.'],
+  pt:['Artistas relacionados','Carregando mais da biblioteca…','Desativado por padrão. As letras são enviadas ao MyMemory, com Apertium como alternativa para idiomas compatíveis. Cookies nunca são enviados. Serviços gratuitos têm limites de disponibilidade e precisão.'],
+  it:['Artisti simili','Caricamento della libreria…','Disattivato per impostazione predefinita. I testi vengono inviati a MyMemory, con Apertium come alternativa per le lingue supportate. I cookie non vengono mai inviati. I servizi gratuiti hanno limiti di disponibilità e precisione.'],
+  ja:['関連アーティスト','ライブラリを追加読み込み中…','初期設定はオフです。歌詞をMyMemoryに送信し、対応言語ではApertiumを代替として使用します。Cookieは送信しません。無料サービスの可用性と精度には制限があります。'],
+};
+for(const [locale,labels] of Object.entries(catalogExtras)){
+  const target=locale==='en'?en:dictionaries[locale as keyof typeof dictionaries];
+  target['catalog.relatedArtists']=labels[0];target['catalog.loadingRest']=labels[1];target['language.translateHint']=labels[2];
+}
+
+const libraryLabels:Record<string,string[]>={
+  en:['Your saved playlists','Your saved albums','Your saved songs','Your saved artists','Sort','Custom','YouTube Music order'],
+  es:['Tus playlists guardadas','Tus álbumes guardados','Tus canciones guardadas','Tus artistas guardados','Ordenar','Personalizado','Orden de YouTube Music'],
+  fr:['Vos playlists enregistrées','Vos albums enregistrés','Vos titres enregistrés','Vos artistes enregistrés','Trier','Personnalisé','Ordre YouTube Music'],
+  de:['Deine gespeicherten Playlists','Deine gespeicherten Alben','Deine gespeicherten Titel','Deine gespeicherten Künstler','Sortieren','Benutzerdefiniert','YouTube Music-Reihenfolge'],
+  pt:['Suas playlists salvas','Seus álbuns salvos','Suas músicas salvas','Seus artistas salvos','Ordenar','Personalizado','Ordem do YouTube Music'],
+  it:['Le tue playlist salvate','I tuoi album salvati','I tuoi brani salvati','I tuoi artisti salvati','Ordina','Personalizzato','Ordine YouTube Music'],
+  ja:['保存したプレイリスト','保存したアルバム','保存した曲','保存したアーティスト','並べ替え','カスタム','YouTube Musicの順序'],
+};
+for(const [locale,labels] of Object.entries(libraryLabels)){
+  const target=locale==='en'?en:dictionaries[locale as keyof typeof dictionaries];
+  ['playlistsTitle','albumsTitle','songsTitle','artistsTitle','sort','custom','defaultOrder'].forEach((key,index)=>target[`library.${key}`]=labels[index]);
+}
+
+const restartLabels:Record<Exclude<Language,'system'>,string[]>={
+  en:['Restarting Cast receiver…','Cast receiver restarted.','Could not restart Cast receiver.'],
+  es:['Reiniciando el receptor Cast…','Receptor Cast reiniciado.','No se pudo reiniciar el receptor Cast.'],
+  fr:['Redémarrage du récepteur Cast…','Récepteur Cast redémarré.','Impossible de redémarrer le récepteur Cast.'],
+  de:['Cast-Empfänger wird neu gestartet…','Cast-Empfänger neu gestartet.','Cast-Empfänger konnte nicht neu gestartet werden.'],
+  pt:['Reiniciando o receptor Cast…','Receptor Cast reiniciado.','Não foi possível reiniciar o receptor Cast.'],
+  it:['Riavvio del ricevitore Cast…','Ricevitore Cast riavviato.','Impossibile riavviare il ricevitore Cast.'],
+  ja:['Cast レシーバーを再起動中…','Cast レシーバーを再起動しました。','Cast レシーバーを再起動できませんでした。'],
+};
+for(const [locale,labels] of Object.entries(restartLabels)){
+  const target=locale==='en'?en:dictionaries[locale as keyof typeof dictionaries];
+  ['restarting','restarted','restartFailed'].forEach((key,index)=>target[`settings.${key}`]=labels[index]);
+}
+
+// Read each preference once; setters and storage events keep the cache current.
+let cachedRawLanguage: Language | undefined;
+let cachedTranslateLyrics: boolean | undefined;
+let cachedTranslationLanguage: TranslationLanguage | undefined;
+function invalidatePreferences(){cachedRawLanguage=undefined;cachedTranslateLyrics=undefined;cachedTranslationLanguage=undefined;}
+/** Observe other Steam windows for the plugin lifetime, including while QAM is closed. */
+export function initI18nPreferences(){
+  invalidatePreferences();
+  const onStorage=(event:StorageEvent)=>{
+    if(event.storageArea && event.storageArea!==localStorage)return;
+    if(event.key!==null && ![STORAGE_KEY,TRANSLATE_KEY,TRANSLATE_LANGUAGE_KEY].includes(event.key))return;
+    invalidatePreferences();
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+  };
+  const onSystemLanguage=()=>window.dispatchEvent(new Event(CHANGE_EVENT));
+  window.addEventListener('storage',onStorage);
+  window.addEventListener('languagechange',onSystemLanguage);
+  return()=>{window.removeEventListener('storage',onStorage);window.removeEventListener('languagechange',onSystemLanguage);invalidatePreferences();};
+}
+function persistPreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Retain the setting for this session when storage is unavailable. */}}
 function savedLanguage():Language {
-  try { const value=localStorage.getItem(STORAGE_KEY) as Language|null; return languageOptions.some(option=>option.id===value) ? value! : 'system'; }
-  catch { return 'system'; }
+  if (cachedRawLanguage !== undefined) return cachedRawLanguage;
+  try { const value=localStorage.getItem(STORAGE_KEY) as Language|null; cachedRawLanguage = languageOptions.some(option=>option.id===value) ? value! : 'system'; }
+  catch { cachedRawLanguage = 'system'; }
+  return cachedRawLanguage;
 }
 function resolvedLanguage(value:Language):Exclude<Language,'system'> {
   if (value !== 'system') return value;
@@ -58,12 +137,21 @@ function resolvedLanguage(value:Language):Exclude<Language,'system'> {
 }
 export function getLanguage(){ return savedLanguage(); }
 export function getResolvedLanguage(){ return resolvedLanguage(savedLanguage()); }
-export function getTranslateLyricsEnabled(){ try { return localStorage.getItem(TRANSLATE_KEY) === 'true'; } catch { return false; } }
-export function setTranslateLyricsEnabled(value:boolean){ localStorage.setItem(TRANSLATE_KEY,String(value)); window.dispatchEvent(new Event(CHANGE_EVENT)); }
-export function getTranslationLanguage():TranslationLanguage { try { const value=localStorage.getItem(TRANSLATE_LANGUAGE_KEY); return value && languageOptions.some(option=>option.id===value && value!=='system') ? value as TranslationLanguage : 'follow'; } catch { return 'follow'; } }
+export function getTranslateLyricsEnabled(){
+  if (cachedTranslateLyrics !== undefined) return cachedTranslateLyrics;
+  try { cachedTranslateLyrics = localStorage.getItem(TRANSLATE_KEY) === 'true'; } catch { cachedTranslateLyrics = false; }
+  return cachedTranslateLyrics;
+}
+export function setTranslateLyricsEnabled(value:boolean){ persistPreference(TRANSLATE_KEY,String(value)); cachedTranslateLyrics = value; window.dispatchEvent(new Event(CHANGE_EVENT)); }
+export function getTranslationLanguage():TranslationLanguage {
+  if (cachedTranslationLanguage !== undefined) return cachedTranslationLanguage;
+  try { const value=localStorage.getItem(TRANSLATE_LANGUAGE_KEY); cachedTranslationLanguage = value && languageOptions.some(option=>option.id===value && value!=='system') ? value as TranslationLanguage : 'follow'; }
+  catch { cachedTranslationLanguage = 'follow'; }
+  return cachedTranslationLanguage;
+}
 export function getResolvedTranslationLanguage(){ const value=getTranslationLanguage(); return value==='follow' ? getResolvedLanguage() : value; }
-export function setTranslationLanguage(value:TranslationLanguage){ if (value!=='follow' && !languageOptions.some(option=>option.id===value)) return; localStorage.setItem(TRANSLATE_LANGUAGE_KEY,value); window.dispatchEvent(new Event(CHANGE_EVENT)); }
-export function setLanguage(value:Language){ localStorage.setItem(STORAGE_KEY,value); window.dispatchEvent(new CustomEvent(CHANGE_EVENT,{detail:value})); }
+export function setTranslationLanguage(value:TranslationLanguage){ if (value!=='follow' && !languageOptions.some(option=>option.id!=='system' && option.id===value)) return; persistPreference(TRANSLATE_LANGUAGE_KEY,value); cachedTranslationLanguage = value; window.dispatchEvent(new Event(CHANGE_EVENT)); }
+export function setLanguage(value:Language){ if(!languageOptions.some(option=>option.id===value))return; persistPreference(STORAGE_KEY,value); cachedRawLanguage = value; window.dispatchEvent(new CustomEvent(CHANGE_EVENT,{detail:value})); }
 export function translate(key:string, values:Record<string,string|number>={}) {
   const language=resolvedLanguage(savedLanguage());
   let value=(language === 'en' ? en[key] : dictionaries[language]?.[key]) || en[key] || key;

@@ -50,3 +50,12 @@ assert.doesNotMatch(paletteSource,/cache\.get\(url\) \|\| previous\.palette/,'a 
 assert.doesNotMatch(paletteSource,/cache\.get\(url\) \|\| value\.palette/,'render-time URL changes use the neutral palette immediately');
 assert.match(paletteSource,/cache\.get\(url\) \|\| defaultPalette/,'uncached artwork uses the intentional Nothing-playing palette');
 console.log('PASS palette transitions cannot leak the previous song color');
+const stored={},colors=['210, 100, 70','100, 55, 45','65, 35, 25'];
+vm.runInNewContext(ts.transpileModule(paletteSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{
+  exports:stored,require:name=>name==='react'?{useState:initial=>[initial,()=>{}],useEffect(){}}:{},
+  localStorage:{getItem:()=>JSON.stringify([['cover',colors],['bad',['999, 1, 2','0, 0, 0','0, 0, 0']]])},
+});
+assert.equal(stored.artworkPaletteReady('cover'),true);
+assert.equal(stored.artworkPaletteReady('bad'),false,'invalid persisted colors are rejected');
+assert.deepEqual(Array.from(stored.useArtworkPalette('cover')),colors,'persisted cover colors are available in the first render');
+console.log('PASS artwork palettes survive reload and are ready on first render');

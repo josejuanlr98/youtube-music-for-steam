@@ -1,18 +1,18 @@
 import { ButtonItem, TextField, DialogButton, Focusable, SidebarNavigation } from '@decky/ui';
 import { call } from '@decky/api';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { apiGetNetwork, apiTrustNetwork, apiUntrustNetwork } from '../services/audioManager';
 import { loadNotificationSettings, saveNotificationSettings, type NotificationSettings } from '../services/notifications';
 import { ThemeScope } from './ThemeScope';
-import { MdCookie, MdPublic } from 'react-icons/md';
+import { MdCookie, MdPublic, MdTranslate } from 'react-icons/md';
 import { SiFirefoxbrowser, SiZenbrowser, SiLibrewolf, SiFloorp } from 'react-icons/si';
 import { languageOptions, useI18n, type Language, type TranslationLanguage } from '../services/i18n';
-const SettingsToggle = ({label, description, checked, disabled, onChange}: {
-  label:string; description?:string; checked:boolean; disabled?:boolean; onChange:(value:boolean) => void;
+const SettingsToggle = ({label, description, checked, disabled, onChange, icon}: {
+  label:string; icon?:ReactNode; description?:string; checked:boolean; disabled?:boolean; onChange:(value:boolean) => void;
 }) => <DialogButton className="ytm-settings-toggle" aria-label={`${label}: ${checked ? '✓' : '○'}`} aria-pressed={checked}
   disabled={disabled} onClick={() => onChange(!checked)}
   style={{width:'100%',minWidth:0,height:'auto',padding:'14px 16px',display:'flex',alignItems:'center',gap:20,textAlign:'left',marginBottom:8}}>
-  <span style={{flex:1,minWidth:0}}><span style={{display:'block',fontSize:14,fontWeight:600}}>{label}</span>
+  <span style={{flex:1,minWidth:0}}><span style={{display:'flex',alignItems:'center',gap:8,fontSize:14,fontWeight:600}}>{icon}<span>{label}</span></span>
     {description && <span style={{display:'block',fontSize:12,lineHeight:1.5,opacity:.72,marginTop:4}}>{description}</span>}
   </span>
   <span aria-hidden="true" className="ytm-switch" data-checked={checked}><span /></span>
@@ -62,7 +62,7 @@ const LanguageContent = () => {
           <span>{option.id === 'system' ? t('language.system') : option.name}</span><span aria-hidden="true">{language === option.id ? '✓' : ''}</span>
         </DialogButton>)}
       </Focusable>}
-      <SettingsToggle label={t('language.translate')} description={t('language.translateHint')} checked={translateLyrics} onChange={setTranslateLyrics} />
+      <SettingsToggle icon={<MdTranslate size={20} aria-hidden="true"/>} label={t('language.translate')} description={t('language.translateHint')} checked={translateLyrics} onChange={setTranslateLyrics} />
       {translateLyrics && <>
         <div className="ytm-eyebrow" style={{margin:'16px 0 8px'}}>{t('language.translationLanguage')}</div>
         <DialogButton className="ytm-button" aria-label={t('language.translationLanguage')} aria-expanded={translationExpanded} onClick={() => setTranslationExpanded(value => !value)}
@@ -229,6 +229,9 @@ const CastContent = () => {
   const [savingName, setSavingName] = useState(false);
   const [network, setNetwork] = useState<NetworkState | null>(null);
   const [message, setMessage] = useState('');
+  const [restarting,setRestarting] = useState(false);
+  const restartBusy=useRef(false),messageRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(message)messageRef.current?.scrollIntoView({block:'nearest',behavior:'smooth'});},[message]);
 
   const refresh = async () => {
     try {
@@ -284,10 +287,11 @@ const CastContent = () => {
   return (
     <div className="ytm-ui ytm-card ytm-settings" style={{ padding:20 }}><ThemeScope />
       <div className="ytm-eyebrow" style={{ marginBottom:8 }}>{t('settings.castTitle')}</div>
+      {message && <div ref={messageRef} role="status" className="ytm-cast-status" style={{ color:'#c5d5e8', fontSize:12, lineHeight:1.5, padding:'10px 12px', marginBottom:14, borderRadius:8, background:'#29323d', overflowWrap:'anywhere', scrollMarginBlock:16 }}>{message}</div>}
       <div style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '10px' }}>
         <div style={{ fontSize: '12px', color: 'var(--gpSystemLighterGrey)', marginBottom: '6px' }}>{t('settings.deviceName')}</div>
         <TextField value={deviceNameInput} onChange={(e) => setDeviceNameInput(e.target.value)} />
-        <ButtonItem disabled={savingName} onClick={() => void saveDeviceName()}>
+        <ButtonItem disabled={savingName || restarting} onClick={() => void saveDeviceName()}>
           {savingName ? t('common.loading') : t('settings.saveDeviceName')}
         </ButtonItem>
         <div style={{ fontSize: '11px', color: 'var(--gpSystemLighterGrey)' }}>{t('settings.advertised',{name:deviceName})}</div>
@@ -299,21 +303,23 @@ const CastContent = () => {
         <div style={{ fontSize: '12px', color: 'var(--gpSystemLighterGrey)' }}>{t('settings.network')}</div>
         <div style={{ marginTop: '4px', fontSize: '14px' }}>{network?.name ?? t('settings.notDetected')}</div>
       </div>
-      <ButtonItem onClick={() => void toggleTrust()}>
+      <ButtonItem disabled={restarting} onClick={() => void toggleTrust()}>
         {network?.trusted ? t('settings.untrust') : t('settings.trust')}
       </ButtonItem>
       {network?.trusted && <div style={{ color: '#4caf50', fontSize: '12px', padding: '8px 0' }}>{t('settings.castEnabled')}</div>}
       <div style={{fontSize:12,lineHeight:1.5,color:'var(--gpSystemLighterGrey)',margin:'14px 0 5px'}}>
         {t('settings.restartHint')}
       </div>
-      <ButtonItem onClick={async () => {
-        setMessage('Restarting Cast receiver…');
+      <ButtonItem disabled={restarting || savingName} onClick={async () => {
+        if(restartBusy.current)return;
+        restartBusy.current=true;setRestarting(true);
+        setMessage(t('settings.restarting'));
         try {
           const result = await call<[], {success?:boolean; error?:string}>('hard_reset');
-          setMessage(result.success ? 'Cast receiver restarted.' : (result.error || 'Could not restart Cast receiver.'));
-        } catch { setMessage('Could not restart Cast receiver.'); }
+          setMessage(result.success ? t('settings.restarted') : (result.error || t('settings.restartFailed')));
+        } catch { setMessage(t('settings.restartFailed')); }
+        finally{restartBusy.current=false;setRestarting(false);}
       }}>{t('settings.restart')}</ButtonItem>
-      {message && <div role="status" style={{ color: '#c5d5e8', fontSize: '12px', padding: '8px 0' }}>{message}</div>}
     </div>
   );
 };

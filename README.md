@@ -14,7 +14,11 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 
 | Library | Queue |
 | --- | --- |
-| ![Library](screenshots/library-069.jpg) | ![Queue](screenshots/queue-069.jpg) |
+| ![Library](screenshots/library-070.jpg) | ![Queue](screenshots/queue-069.jpg) |
+
+| Library categories | Search albums | Artist albums |
+| --- | --- | --- |
+| ![Library categories](screenshots/library-categories-070.jpg) | ![Search albums](screenshots/search-albums-070.jpg) | ![Artist albums](screenshots/artist-detail-070.jpg) |
 
 | Open playlist | Lyrics in Quick Access |
 | --- | --- |
@@ -22,17 +26,18 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 
 | Fullscreen lyrics | Translated lyrics |
 | --- | --- |
-| ![Fullscreen lyrics](screenshots/lyrics-fullscreen-069.jpg) | ![Translated lyrics](screenshots/lyrics-translated-069.jpg) |
+| ![Fullscreen lyrics](screenshots/lyrics-fullscreen-070.jpg) | ![Translated lyrics](screenshots/lyrics-translated-070.jpg) |
 
 | Cast lyrics fullscreen | Language settings | Cookie import |
 | --- | --- | --- |
-| ![Cast lyrics fullscreen](screenshots/lyrics-cast-fullscreen-069.jpg) | ![Language settings](screenshots/language-settings-069.jpg) | ![Cookie import](screenshots/cookie-import-069.jpg) |
+| ![Cast lyrics fullscreen](screenshots/lyrics-cast-fullscreen-069.jpg) | ![Language settings](screenshots/language-settings-070.jpg) | ![Cookie import](screenshots/cookie-import-069.jpg) |
 
 ## What it can do
 
 - **Listen from Quick Access:** search and play tracks, browse your YouTube Music library, and control playback with the Steam Deck controls.
 - **Start big playlists sooner:** playback can begin from the first playable batch while the rest of the playlist loads in the background. The queue fills as loading continues.
 - **Manage music your way:** open playlists to browse and queue individual songs, or play, shuffle, play next, and add the whole playlist. Reorder the queue and set your library to A–Z, Z–A, or a custom order.
+- **Explore the catalogue:** filter Library and Search by playlists, albums, artists or songs. Open an album's track list, or explore an artist's songs, albums, singles and related artists. New collection lists are paginated, with L2/R2 navigation that returns focus to the first item.
 - **Cast to your Steam system:** receive YouTube and YouTube Music Cast sessions from a phone or another device on your trusted network. Playback state, track changes, and supported controls stay in sync with the sender.
 - **Import your account from Firefox-family browsers:** in Desktop Mode, sign in to YouTube Music in Firefox, Zen, LibreWolf, Waterfox, or Floorp, then use **Import cookies**. Manual request-header import is available for other browsers. The plugin saves the session locally; it never asks for your Google password.
 - **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored backdrop, and requests temporary screen-awake protection while lyrics are open. Optional lyric translation uses a separate language selector and preserves the original lines.
@@ -57,7 +62,7 @@ Open Lyrics and press **X** for fullscreen; press **B** to return. When timed ly
 
 Lyrics are loaded on demand and cached for a small number of recent tracks. LRCLIB may provide a timing fallback when its song and artist match. Lyrics availability and timing depend on the providers and version of the recording.
 
-Lyric translation is off by default. Enable it in **Settings → Language** and select a target language. Lyric text, without cookies or account data, is sent to MyMemory on demand. Its free daily quota is external to this plugin; when it is exhausted or unavailable, the original lyrics remain visible and the reader explains the problem. Successful translations are cached during the plugin session.
+Lyric translation is off by default. Enable it in **Settings → Language** and select a target language. Lyric text, without cookies or account data, is sent to MyMemory on demand, with Apertium as a free fallback for the language pairs it supports. No API key is required. Provider quotas and availability are external to this plugin; when it is exhausted or unavailable, the original lyrics remain visible and the reader explains the problem. Successful lines are cached locally across restarts, repeated verses reuse the same translation, and partial results survive failures. Use Retry translation to request only missing lines. The original and translated lines share one highlight animation.
 
 ## Privacy and account sessions
 
@@ -71,7 +76,9 @@ Requirements: Node.js, pnpm, Python, and PowerShell.
 pnpm install
 pnpm run build
 pnpm run build:backend
+pnpm run typecheck:backend
 pnpm test
+pnpm exec vitest run
 pnpm run test:python
 ```
 
@@ -84,3 +91,11 @@ Maintained by [josejuanlr98](https://github.com/josejuanlr98). The current repos
 This project incorporates and builds on licensed upstream work. The original [Decky YouTube Music Player](https://github.com/artistro08/decky-youtube-music-player) and [YouTube Cast Receiver](https://github.com/artistro08/youtube-cast-receiver) remain listed for source and license attribution; this does not describe a current collaboration. Other key dependencies include [yt-cast-receiver](https://www.npmjs.com/package/yt-cast-receiver), [ytmusicapi](https://github.com/sigma67/ytmusicapi), and [yt-dlp](https://github.com/yt-dlp/yt-dlp). Their respective licenses apply.
 
 This project is released under BSD-3-Clause. See [LICENSE](LICENSE).
+
+Library and Search use explicit Songs, Albums, Artists and Playlists filters. New artist windows open in Songs, with separate Albums, Singles & EPs and Related artists filters. New collection windows focus Play; going Back restores the parent filter, page, scroll position and selected item. Album and artist rows offer Play and Shuffle; opened collections offer Play, Shuffle, Play next and Add all. Artist pictures stay square and retain their original framing.
+
+Library categories display a native first-page preview, then load more entries in the background. Refresh also publishes a fresh preview first, preserving usable rows while the full request completes. Previous/Next buttons navigate pages of 40 and retain focus on the matching upper control; L2/R2 focus the first result. Next fetches additional results when needed. Search opens with its input focused and receives Library's category before the first search; afterwards its query, category and results are preserved. Cached catalogue reads and playable album pointers avoid unnecessary requests.
+
+Translation requests for different songs or target languages run independently. Same-song requests are shared, language detection is initialized safely, and repeated source-language detection is cached. Google Cloud Translation requires authentication; its unauthenticated web endpoint returned HTTP 429 during verification, so it is not used as a dependable no-key provider.
+
+AI tools assisted development and testing. Feedback is especially welcome: report the steps to reproduce a problem, your SteamOS/Decky versions, and whether you were playing directly or casting. Use it while gaming or enjoy fullscreen lyrics while games download, and tell us how it works for you.

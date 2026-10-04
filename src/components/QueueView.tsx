@@ -7,6 +7,7 @@ import { usePlayer } from '../context/PlayerContext';
 import { ThemeScope } from './ThemeScope';
 import { MediaRow, RowAction } from './MediaRow';
 import { useI18n } from '../services/i18n';
+import { resetPaginationScroll, usePaginationFocus } from '../services/pagination';
 export const QueueView = () => {
   const { t } = useI18n();
   const { updateState, castConnected } = usePlayer();
@@ -20,13 +21,17 @@ export const QueueView = () => {
   const [error, setError] = useState('');
   const [page, setPage] = useState(0);
   const [pageFocusRequest, setPageFocusRequest] = useState(0);
+  const root=useRef<HTMLDivElement>(null);
+  const {topNext,topPrevious,focusTop,cancelFocus}=usePaginationFocus(root);
   const pageSize = 40;
   const lastPage = Math.max(0, Math.ceil(queue.length / pageSize) - 1);
   const visiblePage = Math.min(page, lastPage);
-  const changePage = (direction:number) => {
+  const changePage = (direction:number,fromButton=false) => {
     if (busy || moving !== null || Math.max(0, Math.min(lastPage, visiblePage + direction)) === visiblePage) return;
     setPage(visiblePage + direction);
-    setPageFocusRequest(current => current + 1);
+    if(fromButton){setPageFocusRequest(0);focusTop(direction);}
+    else {cancelFocus();setPageFocusRequest(current => current + 1);}
+    resetPaginationScroll(root.current);
   };
   const inFlight = useRef(false), alive = useRef(true), revision = useRef(0);
   const visibleIds = queue.slice(visiblePage * pageSize, (visiblePage + 1) * pageSize).map(track => track.videoId).join(',');
@@ -98,7 +103,12 @@ export const QueueView = () => {
     finally { await loadQueue(true); inFlight.current = false; if (alive.current) setBusy(false); }
   };
   const occurrences = new Map<string, number>();
-  return <Focusable flow-children="vertical" className="ytm-ui ytm-collection" onCancelButton={moving !== null ? event => { event.preventDefault(); event.stopPropagation(); setMoving(null); } : undefined}
+  const pagination=(top=false)=>queue.length>pageSize&&<Focusable flow-children="horizontal" className="ytm-playlist-pagination ytm-queue-pagination">
+    <DialogButton ref={top?topPrevious:undefined} className="ytm-button" aria-disabled={visiblePage===0||busy||moving!==null} disabled={!top&&(visiblePage===0||busy||moving!==null)} onClick={()=>changePage(-1,true)}>{t('common.previous')}</DialogButton>
+    <span>{visiblePage+1}/{lastPage+1}</span>
+    <DialogButton ref={top?topNext:undefined} className="ytm-button" aria-disabled={visiblePage===lastPage||busy||moving!==null} disabled={!top&&(visiblePage===lastPage||busy||moving!==null)} onClick={()=>changePage(1,true)}>{t('common.next')}</DialogButton>
+  </Focusable>;
+  return <Focusable ref={root} flow-children="vertical" className="ytm-ui ytm-collection" onCancelButton={moving !== null ? event => { event.preventDefault(); event.stopPropagation(); setMoving(null); } : undefined}
     onButtonDown={event => {
       if (event.detail.is_repeat || busy || moving !== null || lastPage === 0) return;
       const direction = event.detail.button === GamepadButton.TRIGGER_LEFT ? -1 : event.detail.button === GamepadButton.TRIGGER_RIGHT ? 1 : 0;
@@ -109,11 +119,7 @@ export const QueueView = () => {
     {completing && <div role="status" className="ytm-collection-note">{t('queue.loadingRest')}</div>}
     {loading && <div className="ytm-empty">{t('queue.loading')}</div>}
     {!loading && !queue.length && <div className="ytm-empty"><strong>{t('queue.empty')}</strong><p>{t('queue.emptyHint')}</p></div>}
-    {queue.length > pageSize && <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, alignItems:'center', marginBottom:8 }}>
-      <DialogButton className="ytm-button" style={{ padding:6, flex:1 }} disabled={visiblePage === 0 || busy} onClick={() => changePage(-1)}>{t('common.previous')}</DialogButton>
-      <span style={{ fontSize:11 }}>{visiblePage + 1}/{lastPage + 1}</span>
-      <DialogButton className="ytm-button" style={{ padding:6, flex:1 }} disabled={visiblePage === lastPage || busy} onClick={() => changePage(1)}>{t('common.next')}</DialogButton>
-    </Focusable>}
+    {pagination(true)}
     {queue.slice(visiblePage * pageSize, (visiblePage + 1) * pageSize).map((track, offset) => {
       const index = visiblePage * pageSize + offset;
       const occurrence = occurrences.get(track.videoId) ?? 0;
@@ -132,5 +138,6 @@ export const QueueView = () => {
           <RowAction label={t('queue.remove')} disabled={busy || castConnected || index === position} onClick={() => void act(index, 'remove')}><MdClose size={17} /></RowAction>
         </>} />;
     })}
+    {pagination()}
   </Focusable>;
 };

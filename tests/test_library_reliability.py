@@ -79,8 +79,10 @@ class LibraryReliabilityTests(unittest.IsolatedAsyncioTestCase):
         client._auth_headers = {'cookie':'synthetic'}
         client.search = Mock(return_value=[])
         class BulkClient(YTMusic):
-            def __init__(self, headers):
-                self._session = Mock()
+            def __init__(self, headers, requests_session=None):
+                self._session = requests_session
+            def search(self, *args, **kwargs):
+                return []
             def get_playlist(self, *args, **kwargs):
                 started.set()
                 release.wait(3)
@@ -154,7 +156,7 @@ class LibraryReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(second['tracks']), 1600)
         self.assertEqual(second['tracks'][0]['title'], 'Song 0')
         self.p.ytmusic.get_playlist.assert_called_once()
-        with patch.object(module.time, 'monotonic', return_value=module.time.monotonic() + 121):
+        with patch.object(module.time, 'monotonic', return_value=module.time.monotonic() + 301):
             await self.p.get_playlist_tracks('large')
         self.assertEqual(self.p.ytmusic.get_playlist.call_count, 2)
 
