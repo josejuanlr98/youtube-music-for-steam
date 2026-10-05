@@ -114,9 +114,9 @@ function translationIconTests(){
   },useRef:value=>({current:value}),useEffect(){}};
   const modules={
     react,'react/jsx-runtime':{jsx,jsxs:jsx},'@decky/ui':{Focusable:'focusable',DialogButton:'button',SidebarNavigation:'sidebar'},
-    'react-icons/md':{MdTranslate:'translation-svg'},
+    'react-icons/md':{MdTranslate:'translation-svg',MdCastConnected:'cast-svg'},
     '../services/i18n':{useI18n:()=>({t:key=>key,language:'en',translateLyrics:enabled}),languageOptions:[{id:'en',name:'English'}]},
-    '../services/audioManager':{getCurrentTrack:()=>({videoId:'song',title:'Song'}),getIsPlaying:()=>true,getIsCastConnected:()=>false,getCastSenderName:()=>null},
+    '../services/audioManager':{getCurrentTrack:()=>({videoId:'song',title:'Song',artist:'Artist'}),getIsPlaying:()=>true,getIsCastConnected:()=>true,getCastSenderName:()=> 'Phone'},
     '../services/artworkPalette':{useArtworkPalette:()=>['220,60,70','40,90,180','50,60,70']},'../services/lyricsSource':{lyricsSource:()=> 'TestSource'},
     '../services/lyricColor':load('src/services/lyricColor.ts'),
   };
@@ -124,6 +124,9 @@ function translationIconTests(){
   for(enabled of [true,false])for(const fullScreen of [true,false])for(timed of [true,false])for(loading of [true,false]){
     stateIndex=0;
     const tree=panel({fullScreen});
+    const detailColor=modules['../services/lyricColor'].translationColor('40,90,180');
+    assert.equal(walk(tree).find(node=>node.props?.className?.includes('ytm-artist-name')).props.style.color,detailColor);
+    if(fullScreen)assert.equal(walk(tree).find(node=>node.props?.className?.includes('ytm-cast-details')).props.style.color,detailColor);
     const icons=walk(tree).filter(node=>node.type==='translation-svg');
     assert.equal(icons.length,enabled?1:0,'lyric badge follows the setting, independently of translation loading');
     if(enabled){

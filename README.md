@@ -58,7 +58,7 @@ The sender's queue is the initial source during Cast. The plugin keeps the queue
 
 ## Fullscreen lyrics
 
-Open Lyrics and press **X** for fullscreen; press **B** to return. When timed lyrics are available, the current line follows playback and seeking. Otherwise, fullscreen uses a gentle reading scroll. Manual scrolling pauses automatic following briefly. The view asks Steam for temporary wake protection and releases it on exit; availability depends on Steam/CEF.
+Open Lyrics and press **X** for fullscreen; press **B** to return. When timed lyrics are available, the current line follows playback and seeking. Otherwise, fullscreen uses a gentle reading scroll. For untimed lyrics, manual scrolling pauses reading for five seconds, then continues from your position. At the end, it waits five seconds and repeats. Timed lyrics return to the current sung line five seconds after manual input. Artist and Cast details share the light cover color used by translations. The view asks Steam for temporary wake protection and releases it on exit; availability depends on Steam/CEF.
 
 Lyrics are loaded on demand and cached for a small number of recent tracks. LRCLIB may provide a timing fallback when its song and artist match. Lyrics availability and timing depend on the providers and version of the recording.
 

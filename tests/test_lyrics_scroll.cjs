@@ -23,17 +23,18 @@ advance(3000);assert(el.scrollTop>10);assert.equal(frames.size,1);
 motion.setPlaying(false);const paused=el.scrollTop,frameCount=framesRun;advance(3000);
 assert.equal(el.scrollTop,paused);assert.equal(framesRun,frameCount,'playback pause schedules no recurring RAF');assert.equal(timers.size,0);
 motion.setPlaying(true);advance(100);assert(el.scrollTop>paused);
-const anchor=el.scrollTop;motion.pause();el.scrollTop=50;assert.equal(frames.size,0);assert.equal(timers.size,1);
-advance(4950);assert.equal(el.scrollTop,50);advance(50);assert.equal(el.scrollTop,anchor,'manual browsing returns after five seconds');advance(600);assert(el.scrollTop>anchor);
+motion.pause();el.scrollTop=50;assert.equal(frames.size,0);assert.equal(timers.size,1);
+advance(4000);assert.equal(el.scrollTop,50);assert.equal(motion.pause(),false,'repeated input renews the pause');el.scrollTop=35;
+advance(4999);assert.equal(el.scrollTop,35);advance(1);assert.equal(el.scrollTop,35,'untimed reading resumes from the manual position without restoring an old anchor');advance(16);assert(el.scrollTop>35&&el.scrollTop<36);advance(600);assert(el.scrollTop>35);
 while(el.scrollTop<100)advance(16);
-assert.equal(frames.size,0,'end-of-reader wait has no RAF');advance(4950);assert.equal(el.scrollTop,100);advance(50);assert.equal(el.scrollTop,0);advance(3000);assert(el.scrollTop>0);
+assert.equal(frames.size,0,'end-of-reader wait has no RAF');const restart=[...timers.values()][0].at;advance(restart-now-1);assert.equal(el.scrollTop,100);advance(1);assert.equal(el.scrollTop,0);advance(16);assert(el.scrollTop>0,'loop resumes immediately after the five-second end wait');
 doc.visibilityState='hidden';events.get('visibilitychange')();const before=el.scrollTop;
 assert.equal(frames.size,0);assert.equal(timers.size,0);advance(3000);assert.equal(el.scrollTop,before);
 doc.visibilityState='visible';events.get('visibilitychange')();advance(16);assert(el.scrollTop-before<1,'visibility resumes without a catch-up jump');
-// Paused playback still honors the manual return deadline without resuming movement.
-motion.setPlaying(false);const pausedAnchor=el.scrollTop;motion.pause();el.scrollTop=80;advance(5000);assert.equal(el.scrollTop,pausedAnchor);assert.equal(frames.size,0);assert.equal(timers.size,0);
+// Paused playback preserves manual browsing without timers or movement.
+motion.setPlaying(false);motion.pause();el.scrollTop=80;advance(5000);assert.equal(el.scrollTop,80);assert.equal(frames.size,0);assert.equal(timers.size,0);
 // Late translated lines can add overflow after an initially short plain lyric.
 el.scrollHeight=100;motion.setPlaying(true);advance(516);assert.equal(frames.size,0);assert.equal(timers.size,1);
 el.scrollHeight=200;advance(300);assert.equal(frames.size,1);
 const stale=[...frames.values()][0].fn;motion.dispose();assert.equal(events.size,0);assert.equal(frames.size,0);assert.equal(timers.size,0);stale();assert.equal(frames.size,0);
-console.log('PASS RAF reading preserves speed, looping and five-second return, sleeps while paused/hidden, handles late overflow and cleans up');
+console.log('PASS RAF reading preserves speed, looping and five-second manual pause, sleeps while paused/hidden, handles late overflow and cleans up');

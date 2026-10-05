@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.7.1
+
+- Fixed untimed fullscreen lyrics jumping back after manual scrolling. Reading now pauses for five seconds after the last input and continues from the chosen position.
+- At the end of untimed lyrics, reading waits five seconds before repeating, without an extra startup pause.
+- Artist names and Cast text/icons now use the same light cover color as translated lyrics and the translation badge.
+- Regression tests cover local/Cast readers, repeated manual input, looping, paused/hidden playback, cleanup and matching metadata colors.
+
 ## 0.7.0
 
 - Library y Search permiten explorar canciones, álbumes, artistas y playlists, con Play/Shuffle en las colecciones y opciones individuales de cola. La búsqueda conserva su estado y recibe la categoría inicial de Library.

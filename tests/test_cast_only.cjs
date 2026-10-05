@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 const path = require('node:path');
-let state = { authenticated:false, authReady:true, track:{ videoId:'cast-song', title:'Song' }, castConnected:true, castNetwork:{ trusted:true }, repeat:'NONE' };
+let state = { authenticated:false, authReady:true, track:{ videoId:'cast-song', title:'Song', artist:'Artist' }, castConnected:true, castNetwork:{ trusted:true }, repeat:'NONE' };
 let effects = [], calls = [];
 const jsx = (type, props) => ({ type, props });
 const modules = {
@@ -48,6 +48,7 @@ function flatten(node) {
   if (!node || typeof node !== 'object') return [];
   return [node, ...[node.props?.children].flat(Infinity).flatMap(flatten)];
 }
+const lyricColor={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/lyricColor.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:lyricColor});modules['../services/lyricColor']=lyricColor;
 const { LibraryView } = load('LibraryView.tsx');
 const { PlayerView } = load('PlayerView.tsx');
 (async () => {
@@ -56,6 +57,8 @@ const { PlayerView } = load('PlayerView.tsx');
   for(const effect of effects)effect();
   assert.deepEqual(calls, [], 'guest library must not fetch account data');
   const guestPlayer = flatten(PlayerView());
+  const detailColor=lyricColor.translationColor('72,101,137');
+  for(const name of ['ytm-artist-name','ytm-cast-details'])assert.equal(guestPlayer.find(n=>n.props?.className?.includes(name)).props.style.color,detailColor);
   for (const effect of effects) effect();
   assert.deepEqual(calls, [], 'Cast-only player must not request song ratings');
   for (const action of ['Previous', 'Play', 'Next']) {

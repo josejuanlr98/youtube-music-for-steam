@@ -14,6 +14,7 @@ import { useArtworkPalette, defaultAccent } from '../services/artworkPalette';
 import { ThemeScope } from './ThemeScope';
 import { OverflowText, OverflowTextGroup } from './OverflowText';
 import { useI18n } from '../services/i18n';
+import { translationColor } from '../services/lyricColor';
 
 const button: React.CSSProperties = { flex:'1 1 0', width:0, minWidth:0, minHeight:28, maxHeight:34, height:30, borderRadius:8, boxSizing:'border-box', lineHeight:'normal', fontSize:12, padding:'0 8px', display:'flex', alignItems:'center', justifyContent:'center', gap:6, margin:0 };
 const formatTime = (value: number) => { const total = Math.max(0, Math.floor(value || 0)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`; };
@@ -29,6 +30,7 @@ export const PlayerView = () => {
   const [showLyrics, setShowLyrics] = useState(false);
   const viewRef = useRef<HTMLDivElement>(null);
   const [accent, secondary, tertiary] = useArtworkPalette(track?.albumArt, viewRef);
+  const detailColor=translationColor(secondary);
   useEffect(() => {
     const element = viewRef.current;
     if (!element) return;
@@ -93,7 +95,7 @@ export const PlayerView = () => {
       <ThemeScope />
       <div className="ytm-card" style={{ position:'relative', padding:'10px 34px 12px 10px', flexShrink:0, minWidth:0 }}>
           <SiYoutubemusic className="ytm-cover-logo" size={20} aria-label="YouTube Music" style={{ position:'absolute', right:10, top:10, color:`rgb(${accent})`, opacity:track?.albumArt && accent === defaultAccent ? 0 : 1, transition:'opacity 180ms ease' }} />
-          {castConnected && <div className="ytm-muted" style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:6, fontSize:11, minWidth:0, marginBottom:8 }}>
+          {castConnected && <div className="ytm-muted ytm-cast-details" style={{ color:detailColor, display:'flex', justifyContent:'center', alignItems:'center', gap:6, fontSize:11, minWidth:0, marginBottom:8 }}>
             <MdCastConnected size={13} style={{ flexShrink:0 }} /><span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{castSenderName || 'Connected device'}</span>
           </div>}
         <div style={{ display:'flex', gap:10, alignItems:'center', justifyContent:'center', minWidth:0 }}>
@@ -101,7 +103,7 @@ export const PlayerView = () => {
             : <div style={{ width:'clamp(52px, 15vw, 64px)', height:'clamp(52px, 15vw, 64px)', borderRadius:4, background:'#344052', display:'grid', placeItems:'center', flexShrink:0 }}><FaMusic size={28} /></div>}
           <OverflowTextGroup textKey={`${track?.title}|${track?.artist}`} style={{ minWidth:0, maxWidth:'calc(100% - 74px)', textAlign:'center' }}>
             <div style={{ fontSize:15, fontWeight:700, lineHeight:1.3 }}><OverflowText text={track?.title ?? t('player.nothing')} /></div>
-            <div className="ytm-muted" style={{ fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? t('player.find') : authReady ? 'Cast from your device' : '')} /></div>
+            <div className="ytm-muted ytm-artist-name" style={{ color:track?.artist?detailColor:undefined, fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? t('player.find') : authReady ? 'Cast from your device' : '')} /></div>
           </OverflowTextGroup>
         </div>
       </div>

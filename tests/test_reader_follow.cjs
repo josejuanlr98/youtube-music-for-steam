@@ -5,7 +5,7 @@ function load(file,modules={},globals={}){
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,require:name=>modules[name]||{},console,...globals});
   return exports;
 }
-async function readerTest(fullScreen,cast){
+async function readerTest(fullScreen,cast,timed=true){
   let now=0,id=0,position=8,offset=0,translated;
   const frames=new Map(),timers=new Map(),intervals=new Map(),listeners=new Set();
   const clock={Date:{now:()=>now},setTimeout:(fn,delay)=>{timers.set(++id,{fn,at:now+delay});return id;},clearTimeout:key=>timers.delete(key),
@@ -35,12 +35,12 @@ async function readerTest(fullScreen,cast){
   component=load('src/components/LyricsPage.tsx',{
     'react/jsx-runtime':{jsx,jsxs:jsx},react,
     '@decky/ui':{Focusable:'focusable',DialogButton:'button',Navigation:{},GamepadButton:{DIR_UP:9,DIR_DOWN:10}},
-    '../services/readerScroll':motion,'../services/syncedLyrics':synced,
+    '../services/lyricsScroll':load('src/services/lyricsScroll.ts',{},globals),'../services/readerScroll':motion,'../services/syncedLyrics':synced,
     '../services/lyricColor':load('src/services/lyricColor.ts'),
     '../services/audioManager':{getCurrentTrack:()=>({videoId:'song',title:'Song'}),getIsPlaying:()=>true,getIsCastConnected:()=>cast,getCastSenderName:()=>cast?'Phone':null,
       getProgress:()=>({position,duration:30}),getLivePlaybackPosition:()=>position,
       addProgressListener:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},addCastConnectionListener:()=>()=>{},addTrackChangeListener:()=>()=>{},addPlayStateListener:()=>()=>{}},
-    '../services/lyrics':{loadLyrics:async()=>({lyrics:'One\nTwo\nThree',timedLines:lines}),loadTranslatedLyrics:()=>new Promise(resolve=>translated=resolve)},
+    '../services/lyrics':{loadLyrics:async()=>({lyrics:'One\nTwo\nThree',timedLines:timed?lines:undefined}),loadTranslatedLyrics:()=>new Promise(resolve=>translated=resolve)},
     '../services/focus':{focusLyricsReader:()=>()=>{}},'../services/notifications':{suppressFullscreenNotifications:()=>()=>{}},
     '../services/i18n':{useI18n:()=>({t:key=>key,translateLyrics:true,resolvedTranslationLanguage:'es'})},
     '../services/artworkPalette':{useArtworkPalette:()=>['100,120,140','80,90,100','50,60,70']},'../services/lyricsSource':{lyricsSource:()=>''},
@@ -51,9 +51,25 @@ async function readerTest(fullScreen,cast){
     const batch=[...frames];frames.clear();batch.forEach(([,fn])=>fn(now));
     await pump();
   }};
-  await pump();await advance(50);assert.equal(offset,110,'entry centers the current audio cue');
+  await pump();await advance(50);if(timed)assert.equal(offset,110,'entry centers the current audio cue');
   const getReader=()=>walk(tree).find(node=>node.props?.className==='ytm-reader ytm-card');
   assert.equal(getReader().props.style.scrollBehavior,'auto','native smooth scrolling cannot fight the spring animation');
+  if(!timed){
+    await advance(2500);const before=offset;assert(before>0);
+    getReader().props.onGamepadDirection({detail:{button:10},preventDefault(){},stopPropagation(){}});
+    await advance(4000);assert.equal(offset,before+140);
+    getReader().props.onKeyDown({key:'PageDown',preventDefault(){}});
+    await advance(2500);const settled=offset;assert.equal(settled,before+380);
+    translated({translatedLines:['Uno','Dos','Tres']});await pump();
+    await advance(2499);assert.equal(offset,settled,'translation arrival does not restart manual browsing');
+    await advance(501);assert(offset>settled&&offset<settled+12,'resume from the user position without a jump');
+    getReader().props.onWheel();reader.scrollTop=1480;
+    await advance(4999);assert.equal(offset,1480);
+    await advance(17);assert(offset<2,'manual end waits five seconds then restarts the loop');
+    await advance(1000);assert(offset>10,'loop continues without an additional start delay');
+    slots.forEach(slot=>slot.cleanup?.());assert.equal(frames.size,0);assert.equal(intervals.size,0);assert.equal(timers.size,0);
+    console.log(`PASS untimed fullscreen ${cast?'Cast':'local'}: manual animation settles, waits five seconds and resumes without a jump`);return;
+  }
   getReader().props.onGamepadDirection({detail:{button:10},preventDefault(){},stopPropagation(){}});
   await advance(3000);assert.equal(offset,110+(fullScreen?140:80));
   position=16;
@@ -74,4 +90,4 @@ async function readerTest(fullScreen,cast){
   slots.forEach(slot=>slot.cleanup?.());assert.equal(frames.size,0);assert.equal(intervals.size,0);assert.equal(timers.size,0);
   console.log(`PASS ${fullScreen?'fullscreen':'tab'} ${cast?'Cast':'local'}: five-second follow returns after repeated input and translation, with pixel rounding`);
 }
-(async()=>{for(const fullScreen of [false,true])for(const cast of [false,true])await readerTest(fullScreen,cast);})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{for(const fullScreen of [false,true])for(const cast of [false,true])await readerTest(fullScreen,cast);for(const cast of [false,true])await readerTest(true,cast,false);})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -137,7 +137,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
           const timer = window.setInterval(() => listener(getLivePlaybackPosition()), 100);
           return () => { unsubscribe(); window.clearInterval(timer); };
         }, setActiveLine, move)
-      : fullScreen ? startLyricsScroll(scrollRef.current, 2000, move) : null;
+      : fullScreen ? startLyricsScroll(scrollRef.current, 2000) : null;
     if (!motion) return;
     if (!lines?.length) (motion as { setPlaying?(value:boolean):void }).setPlaying?.(playing);
     autoScroll.current = motion;
@@ -258,14 +258,14 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       <div className="ytm-lyrics-layout" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'row', gap: fullScreen ? 'clamp(18px, 4vw, 54px)' : 10, flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', alignItems: fullScreen ? 'center' : 'stretch', justifyContent:fullScreen ? 'center' : undefined, maxWidth:fullScreen ? 860 : undefined, width:'100%', margin:fullScreen ? '0 auto' : undefined }}>
         <div className="ytm-cover-column" style={{ width: fullScreen ? 'min(26vw, 260px, max(80px, calc(100vh - 360px)))' : 78, minWidth: fullScreen ? 80 : 78, maxWidth: fullScreen ? (centered ? '80%' : '30%') : 78, maxHeight:fullScreen ? '100%' : undefined, flex: '0 0 auto', overflowY: fullScreen ? 'auto' : 'hidden', textAlign: fullScreen ? 'center' : 'left', paddingBlock:fullScreen ? 8 : 0, boxSizing:'border-box' }}>
           {fullScreen && track && <SiYoutubemusic className="ytm-cover-logo" size={44} style={{ display:'block', width:'clamp(44px, 3.4vw, 64px)', height:'clamp(44px, 3.4vw, 64px)', minHeight:44, overflow:'visible', margin:'0 auto 20px', color:`rgb(${accent})` }} aria-label="YouTube Music" />}
-          {fullScreen && cast.connected && <div className="ytm-muted" style={{ textAlign:'center', fontSize:10, lineHeight:1.4, marginBottom:12, overflowWrap:'anywhere' }}>
+          {fullScreen && cast.connected && <div className="ytm-muted ytm-cast-details" style={{ color:translatedColor, textAlign:'center', fontSize:10, lineHeight:1.4, marginBottom:12, overflowWrap:'anywhere' }}>
             <MdCastConnected size={12} style={{ verticalAlign:'middle', marginRight:6 }} />{cast.sender || 'Connected device'}
           </div>}
           {track?.albumArt ? <img src={artwork} onError={event => { if (event.currentTarget.src !== track.albumArt) event.currentTarget.src = track.albumArt; }} alt="Album art" style={{ width: fullScreen ? '100%' : 78, height: fullScreen ? 'auto' : 78, aspectRatio: '1', display: 'block', maxWidth: '100%', objectFit: 'cover', borderRadius: fullScreen ? 8 : 4, boxShadow:'none' }} />
             : <div className="ytm-card" style={{ width: '100%', aspectRatio: '1', display: 'grid', placeItems: 'center' }}><SiYoutubemusic size={fullScreen ? 84 : 26} /></div>}
           <OverflowTextGroup textKey={`${fullScreen}|${track?.title}|${track?.artist}`}>
           <h2 style={{ fontSize: fullScreen ? 16 : 12, lineHeight: 1.3, margin: fullScreen ? '14px 0 4px' : '8px 0 4px', overflowWrap: 'anywhere', overflow: 'hidden' }}>{fullScreen ? <OverflowText text={track?.title ?? 'Nothing playing'} /> : track?.title ?? 'Nothing playing'}</h2>
-          <div className="ytm-muted" style={{ fontSize: fullScreen ? 15 : 11, lineHeight: 1.35, overflowWrap: 'anywhere', overflow:'hidden' }}>{fullScreen ? <OverflowText text={track?.artist || 'Play a song to see its lyrics.'} /> : track?.artist || 'Play a song to see its lyrics.'}</div>
+          <div className="ytm-muted ytm-artist-name" style={{ color:track?.artist?translatedColor:undefined, fontSize: fullScreen ? 15 : 11, lineHeight: 1.35, overflowWrap: 'anywhere', overflow:'hidden' }}>{fullScreen ? <OverflowText text={track?.artist || 'Play a song to see its lyrics.'} /> : track?.artist || 'Play a song to see its lyrics.'}</div>
 
           </OverflowTextGroup>
           {source && <div className="ytm-lyrics-source" style={{ marginTop:12, fontSize:fullScreen ? 10 : 9, lineHeight:1.4, color:`rgb(${accent})`, opacity:.82, overflowWrap:'anywhere' }}>
