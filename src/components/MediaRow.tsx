@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 
 import { useArtworkAccent, defaultAccent, defaultPalette, preloadArtworkPalette } from '../services/artworkPalette';
 import { FaMusic } from 'react-icons/fa';
 import { focusLyricsReader } from '../services/focus';
+import { focusMediaRow, blurMediaRow } from '../services/mediaRowFocus';
 
 /** One card, with separated controls so focus never creates scalloped joins. */
 export function MediaRow({ title, subtitle, image, icon, actions, selected, disabled, onPlay, editing, tintFocus = true, playDescription = 'Play', endIcon, focusRequest, imageFit='cover', focusId }: {
@@ -14,6 +15,10 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = ref.current;
+    return () => blurMediaRow(row);
+  }, []);
   const [sample, setSample] = useState(false);
   const [paletteStatus, setPaletteStatus] = useState<{ image:string; status:'ready'|'fallback' } | null>(null);
   useEffect(() => {
@@ -46,7 +51,10 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
   useEffect(() => focusRequest && !disabled && paletteResolved ? focusLyricsReader(mainRef.current) : undefined, [focusRequest, disabled, paletteResolved]);
   const useTint = !tintFocus || !image || paletteStatus?.image === image && paletteStatus.status === 'ready';
   const accent = useArtworkAccent(useTint && tintFocus && sample ? image || undefined : undefined, ref);
-  return <Focusable ref={ref} onFocusCapture={() => { if (tintFocus) setSample(true); }}
+  return <Focusable ref={ref} noFocusRing
+    onGamepadFocus={() => focusMediaRow(ref.current)} onGamepadBlur={() => blurMediaRow(ref.current)}
+    onFocusCapture={() => { focusMediaRow(ref.current); if (tintFocus) setSample(true); }}
+    onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) blurMediaRow(ref.current); }}
     style={{ '--ytm-row-accent':accent !== defaultAccent ? accent : '125,145,165', visibility:paletteResolved ? undefined : 'hidden' } as CSSProperties}
     className={`ytm-media-row${selected ? ' ytm-media-current' : ''}${tintFocus ? ' ytm-library-tint' : ''}`} flow-children="horizontal">
     {editing ? <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div><div className="ytm-media-subtitle">{subtitle}</div></div> :

@@ -29,6 +29,18 @@ function navigationTests(){
   assert.equal(state.libraryReturnPending(),true);
   assert.equal(events.at(-1).detail.preserveCategory,true,'Search B keeps the category that launched it');
   timers.shift()();assert.equal(opens,2);assert.equal(state.libraryReturnPending(),true,'Library intent survives QAM remount');
+  const settings=load('src/components/SettingsPage.tsx',{
+    'react/jsx-runtime':{jsx,jsxs:jsx},'@decky/ui':{Focusable:'focusable'},
+    '../services/i18n':{useI18n:()=>({t:key=>key})},'../services/browseNavigation':browse,
+  }).SettingsPage();
+  let prevented=0,stopped=0;
+  const event={preventDefault:()=>prevented++,stopPropagation:()=>stopped++};
+  settings.props.onCancelButton(event);settings.props.onCancelButton(event);
+  assert.equal(prevented,2);assert.equal(stopped,2,'B does not also invoke Steam default navigation');
+  assert.equal(backs,5,'Settings closes once even if B is delivered twice');
+  assert.equal(opens,2);timers.shift()();assert.equal(opens,3,'Settings reopens the plugin after the route closes');
+  assert.equal(state.consumePlayerReturn(),true,'Settings restores Player even when the panel remounts');
+  assert.equal(state.libraryReturnPending(),false);
   console.log('PASS nested playback unwinds only plugin pages and restores Player across remounts');
 }
 async function actionTests(){
@@ -150,7 +162,7 @@ function translationIconTests(){
   }
   stateIndex=0;inLyrics=false;
   const settings=load('src/components/SettingsPage.tsx',modules).SettingsPage();
-  const language=settings.props.pages.find(page=>page.route.endsWith('/language')).content;
+  const language=walk(settings).find(node=>node.props?.pages).props.pages.find(page=>page.route.endsWith('/language')).content;
   const toggle=walk(language.type(language.props)).find(node=>node.props?.label==='language.translate');
   assert.equal(toggle.props.icon.type,'translation-svg','Settings uses the same SVG as both lyric views');
   console.log('PASS translation SVG is shared with Settings, accessible, placed below Source and color-matched to timed and plain translations in both readers');

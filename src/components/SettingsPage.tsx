@@ -7,6 +7,7 @@ import { ThemeScope } from './ThemeScope';
 import { MdCookie, MdPublic, MdTranslate } from 'react-icons/md';
 import { SiFirefoxbrowser, SiZenbrowser, SiLibrewolf, SiFloorp } from 'react-icons/si';
 import { languageOptions, useI18n, type Language, type TranslationLanguage } from '../services/i18n';
+import { returnBrowseToPlayer } from '../services/browseNavigation';
 const SettingsToggle = ({label, description, checked, disabled, onChange, icon}: {
   label:string; icon?:ReactNode; description?:string; checked:boolean; disabled?:boolean; onChange:(value:boolean) => void;
 }) => <DialogButton className="ytm-settings-toggle" aria-label={`${label}: ${checked ? '✓' : '○'}`} aria-pressed={checked}
@@ -326,7 +327,9 @@ const CastContent = () => {
 
 export const SettingsPage = () => {
   const { t } = useI18n();
-  return <SidebarNavigation
+  return <Focusable noFocusRing style={{width:'100%',height:'100%',minHeight:0}} onCancelActionDescription={t('common.back')}
+    onCancelButton={event => { event.preventDefault(); event.stopPropagation(); returnBrowseToPlayer(); }}>
+    <SidebarNavigation
     title="YouTube Music"
     showTitle
     pages={[
@@ -335,5 +338,6 @@ export const SettingsPage = () => {
       { title: t('settings.notifications'), content: <NotificationsContent />, route: '/youtube-music-settings/notifications', visible: true },
       { title: t('settings.language'), content: <LanguageContent />, route: '/youtube-music-settings/language', visible: true },
     ]}
-  />;
+    />
+  </Focusable>;
 };

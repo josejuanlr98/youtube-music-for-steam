@@ -73,7 +73,7 @@ async function restartNoticeTests(){
  let finish,calls=0;
  const view=harness({'@decky/api':{call:async name=>name==='get_cast_device_name'?{name:'Steam Deck'}:name==='hard_reset'?(calls++,await new Promise(resolve=>finish=resolve)):{}},
   '../services/audioManager':{apiGetNetwork:async()=>({name:'Home',trusted:true})}});
- const settings=view.load('src/components/SettingsPage.tsx').SettingsPage();const content=settings.props.pages.find(page=>page.route.endsWith('/cast')).content;
+ const settings=view.load('src/components/SettingsPage.tsx').SettingsPage();const content=walk(settings).find(node=>node.props?.pages).props.pages.find(page=>page.route.endsWith('/cast')).content;
  view.setRender(()=>content.type(content.props));await view.pump();
  const restart=()=>walk(view.tree).find(node=>node.type==='button'&&node.props.children==='settings.restart');
  const first=restart().props.onClick(),second=restart().props.onClick();await view.pump();assert.equal(calls,1,'double click cannot start two backend resets');assert.equal(restart().props.disabled,true);

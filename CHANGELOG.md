@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.7.2
+
+- Media rows now have one visual focus owner per Steam document. Rapid controller navigation no longer leaves highlighted cards or action buttons behind when native focus or Steam focus classes lag.
+- Removed inherited row focus animations and focus-ring pseudo-elements so selection updates immediately.
+- Leaving Settings with B closes the route once and reopens the YouTube Music Player panel.
+- Tests cover rapid focus transfers, stale blur events, document isolation, internal action focus and repeated Settings Back input.
+
 ## 0.7.1
 
 - Fixed untimed fullscreen lyrics jumping back after manual scrolling. Reading now pauses for five seconds after the last input and continues from the chosen position.
