@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.7.3
+
+- Volume and progress slider thumbs now share the light cover color used by artist names, the translation badge and translated lyrics. Both separate handles and Steam track pseudo-element thumbs are covered.
+- Fixed Steamcord notification compatibility: use its shared routing with plain-text titles and bodies instead of bypassing its safe renderer. Notifications identify YouTube Music and retain the song/artist text.
+- Notification sound guards recover when another plugin replaces the Steam sound method, and unloading preserves that plugin's replacement.
+- Verified against the actual Steamcord 1.40.3 notification source in both load orders, including safe/native modes, streamer policy, manual/fullscreen suppression and cleanup. Slider color checks pass at 1280x720 and 1280x800.
+
 ## 0.7.2
 
 - Media rows now have one visual focus owner per Steam document. Rapid controller navigation no longer leaves highlighted cards or action buttons behind when native focus or Steam focus classes lag.

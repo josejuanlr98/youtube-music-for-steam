@@ -72,19 +72,35 @@ export async function saveNotificationSettings(value: NotificationSettings) {
   return { ...settings };
 }
 
-function nativeToast(data: Parameters<typeof toaster.toast>[0]) {
+function notificationText(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(notificationText).join('');
+  if (value && typeof value === 'object' && 'props' in value)
+    return notificationText((value as {props?: {children?:unknown}}).props?.children);
+  return '';
+}
+
+function sendToast(data: Parameters<typeof toaster.toast>[0]) {
   const shared = (window as unknown as {
     DeckyPluginLoader?: { toaster?: typeof toaster & { __steamcordSafe?: number | boolean } };
   }).DeckyPluginLoader?.toaster;
-  // Steamcord replaces the shared instance method for every Decky plugin.
-  // Call Decky's prototype implementation only for our notifications; never
-  // replace the shared method or change Steamcord's notification preferences.
+  // Steamcord's safe renderer accepts strings, not JSX. Respect its routing
+  // and streaming preferences instead of bypassing it with a native Decky toast.
   if (shared?.__steamcordSafe) {
-    const original = Object.getPrototypeOf(shared)?.toast;
-    if (typeof original !== 'function') throw new Error('Native Decky notifications unavailable');
-    return original.call(shared, data) as ReturnType<typeof toaster.toast>;
+    return shared.toast({ ...data, title:`YouTube Music · ${notificationText(data.title)}`, body:notificationText(data.body) });
   }
   return toaster.toast(data);
+}
+
+// A plugin may replace the sound method outright, outside Decky's patch chain.
+// Only remove our patch if it is still reachable; never overwrite that plugin.
+function soundPatchInstalled(patch: Patch) {
+  let current = patch.object[patch.property];
+  for (let depth = 0; typeof current === 'function' && depth < 32; depth++) {
+    if (current === patch.patchedFunction) return true;
+    current = current.__deckyPatch?.original;
+  }
+  return false;
 }
 
 // Mounted once for the plugin lifetime, independent of the Quick Access panel.
@@ -94,7 +110,8 @@ export function initNotifications() {
   let alive = true;
   let soundPatch: Patch | undefined;
   const ensureSoundPatch = () => {
-    if (soundPatch) return;
+    if (soundPatch && soundPatchInstalled(soundPatch)) return;
+    soundPatch = undefined;
     const store = (window as unknown as { NotificationStore?: { PlayNotificationSound?: (...args: any[]) => unknown } }).NotificationStore;
     if (typeof store?.PlayNotificationSound !== 'function') throw new Error('Steam notification sound hook is unavailable');
     // Steam's queued-toast path selects sound by eType again, discarding the
@@ -116,7 +133,7 @@ export function initNotifications() {
       // Keep fast skips from filling the Steam notification queue.
       if (active.size >= 2) { const oldest = active.values().next().value; oldest?.dismiss(); if (oldest) active.delete(oldest); }
       const payload = { ...data, ytmNotification:true, duration:5000, showToast:true, showNewIndicator:false };
-      const item = nativeToast(payload);
+      const item = sendToast(payload);
       if (!item || typeof item.dismiss !== 'function') return;
       active.add(item);
       const timer = setTimeout(() => { active.delete(item); timers.delete(timer); }, 6000);
@@ -141,5 +158,5 @@ export function initNotifications() {
     }),
   ];
   void loadNotificationSettings().catch(error => console.warn('[YTM] Could not load notification preferences', error));
-  return () => { alive = false; ready = false; quietPlayback.clear(); dismissVisible = undefined; removers.forEach(remove => remove()); timers.forEach(clearTimeout); active.forEach(item => item.dismiss()); soundPatch?.unpatch(); };
+  return () => { alive = false; ready = false; quietPlayback.clear(); dismissVisible = undefined; removers.forEach(remove => remove()); timers.forEach(clearTimeout); active.forEach(item => item.dismiss()); if (soundPatch && soundPatchInstalled(soundPatch)) soundPatch.unpatch(); };
 }

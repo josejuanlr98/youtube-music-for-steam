@@ -58,6 +58,7 @@ const { PlayerView } = load('PlayerView.tsx');
   assert.deepEqual(calls, [], 'guest library must not fetch account data');
   const guestPlayer = flatten(PlayerView());
   const detailColor=lyricColor.translationColor('72,101,137');
+  assert.equal(guestPlayer.find(n=>n.props?.className==='ytm-ui ytm-player-view').props.style['--ytm-detail-color'],detailColor,'slider thumbs inherit the exact metadata/translation color');
   for(const name of ['ytm-artist-name','ytm-cast-details'])assert.equal(guestPlayer.find(n=>n.props?.className?.includes(name)).props.style.color,detailColor);
   for (const effect of effects) effect();
   assert.deepEqual(calls, [], 'Cast-only player must not request song ratings');

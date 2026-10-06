@@ -48,3 +48,16 @@ media.props.onGamepadFocus();rowFocus.focusMediaRow(second);media.props.onGamepa
 assert(!themeCss.includes('.ytm-media-row:focus-within'));assert(!themeCss.includes('.ytm-media-row:has(.gpfocus)'),'stale Steam/DOM focus cannot paint previous cards');
 assert.match(themeCss,/ytm-media-row[^}]*transition:none !important; animation:none !important/);
 console.log('PASS rapid gamepad/native focus transfers leave exactly one highlighted row, ignore stale blur and suppress inherited glow transitions');
+
+const sliders=load('src/components/VolumeSlider.tsx',{
+ 'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},
+ react:{useRef:()=>({current:null}),useEffect(){}},
+ '@decky/ui':{SliderField:'slider',gamepadSliderClasses:{SliderTrack:'steam-track',SliderHandle:'steam-handle'}},
+});
+const slider=sliders.PaddedSlider({value:50,min:0,max:100});
+const styles=slider.props.children.filter(node=>node?.type==='style').map(node=>node.props.children).join('');
+assert.match(styles,/\.ytm-player-view \.ytm-compact-slider \.steam-handle/,'thumb styling is scoped to our player');
+assert.match(styles,/\.ytm-player-view \.ytm-compact-slider \.steam-track::after/,'Steam builds that draw the thumb as a pseudo-element use the same color');
+assert.match(styles,/background:var\(--ytm-detail-color,rgb\(198,210,223\)\) !important/);
+assert.match(styles,/--left-track-color:rgb\(var\(--ytm-cover-accent/,'track fill keeps the primary cover color');
+console.log('PASS both native slider thumbs inherit the same light cover color as metadata, without changing other plugins or track fill');

@@ -91,7 +91,7 @@ export const PlayerView = () => {
   return (
     <Focusable ref={viewRef} onSecondaryActionDescription={track && authenticated ? 'Fullscreen lyrics' : undefined}
       onSecondaryButton={track && authenticated ? event => { event.preventDefault(); event.stopPropagation(); Navigation.CloseSideMenus(); Navigation.Navigate(LYRICS_ROUTE); } : undefined}
-      className="ytm-ui ytm-player-view" style={{ '--ytm-cover-accent':accent, '--ytm-cover-secondary':secondary, '--ytm-cover-tertiary':tertiary, width:'100%', maxWidth:'100%', minWidth:0, minHeight:0, boxSizing:'border-box', padding:'2px 2px 6px', display:'flex', flexDirection:'column', gap:6 } as React.CSSProperties}>
+      className="ytm-ui ytm-player-view" style={{ '--ytm-cover-accent':accent, '--ytm-cover-secondary':secondary, '--ytm-cover-tertiary':tertiary, '--ytm-detail-color':detailColor, width:'100%', maxWidth:'100%', minWidth:0, minHeight:0, boxSizing:'border-box', padding:'2px 2px 6px', display:'flex', flexDirection:'column', gap:6 } as React.CSSProperties}>
       <ThemeScope />
       <div className="ytm-card" style={{ position:'relative', padding:'10px 34px 12px 10px', flexShrink:0, minWidth:0 }}>
           <SiYoutubemusic className="ytm-cover-logo" size={20} aria-label="YouTube Music" style={{ position:'absolute', right:10, top:10, color:`rgb(${accent})`, opacity:track?.albumArt && accent === defaultAccent ? 0 : 1, transition:'opacity 180ms ease' }} />

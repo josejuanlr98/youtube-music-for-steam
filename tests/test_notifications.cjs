@@ -83,17 +83,24 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   assert.equal(notificationStore.PlayNotificationSound({ decky:true, data:{ playSound:false } }), 'played');
   assert.equal(sounded.length, 6, 'Steam achievements and other plugins are untouched');
   assert(dismissed > 0, 'fast events must bound active toasts');
-  let chats = 0;
+  let chats = 0,nativeMode=false;const safeRouted=[];
   // Reproduce Steamcord's own-property replacement (it returns undefined).
-  const reroute = () => { chats++; };
+  const reroute = data => {
+    chats++;
+    if(nativeMode)return DeckyToaster.prototype.toast.call(sharedToaster,data);
+    const str=value=>typeof value==='string'?value:value==null?'':'Notification';
+    safeRouted.push({title:str(data.title)||'Decky',body:str(data.body),quiet:true});toasts.push(data);
+    return undefined;
+  };
   sharedToaster.__steamcordSafe = 2;
   sharedToaster.toast = reroute;
   listeners.playing({ ...track, videoId:'with-steamcord' });
-  assert.equal(chats, 0);
+  assert.equal(chats, 1,'YouTube notifications use Steamcord safe routing instead of bypassing it');
+  assert.deepEqual(safeRouted.at(-1),{title:'YouTube Music · Song',body:'Artist',quiet:true});
   assert.equal(toasts.at(-1).logo.props.src, track.albumArt);
-  flushSounds(); assert.equal(sounded.length, 6, 'silent native toast stays silent with Steamcord');
+  flushSounds(); assert.equal(sounded.length, 6, 'Steamcord safe routing stays silent');
   assert.equal(sharedToaster.toast, reroute, 'other plugins retain their existing routing');
-  sharedToaster.toast({ title:'Other plugin' }); assert.equal(chats, 1);
+  sharedToaster.toast({ title:'Other plugin' }); assert.equal(chats, 2);assert.equal(safeRouted.at(-1).title,'Other plugin');
   stop(); assert.equal(Object.keys(listeners).length, 0); assert.equal(timers.size, 0);
   assert.equal(notificationStore.PlayNotificationSound, originalSound, 'unload restores native sound playback');
   const stopAgain = exportsObject.initNotifications();
@@ -110,8 +117,8 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   listeners.playing({ ...track, videoId:'next-after-selection' }, false);
   assert.equal(toasts.length, beforeManualPick + 2, 'automatic advancement after a manual selection notifies');
   listeners.sender('Steamcord loaded first');
-  assert.equal(toasts.at(-1).title.props.children, 'Steamcord loaded first');
-  assert.equal(chats, 1, 'works regardless of plugin load order');
+  assert.equal(toasts.at(-1).title, 'YouTube Music · Steamcord loaded first');
+  assert.equal(safeRouted.at(-1).body,'Connected · YouTube Music','works regardless of plugin load order');
   const beforeFullscreen = toasts.length;
   const resumeNotifications = exportsObject.suppressFullscreenNotifications();
   listeners.sender('Hidden in fullscreen');
@@ -135,6 +142,19 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions:{ module:ts.Modu
   unregister();
   listeners.sender('Panel closed');
   assert.equal(toasts.length, beforePanel + 2, 'unmount restores notifications');
-  stopAgain();
+  // Native opt-in still preserves our sound preference if Steamcord replaced
+  // the sound method outright after YouTube Music installed its patch.
+  nativeMode=true;
+  const steamcordSound=function(notification){return originalSound.call(this,notification);};
+  notificationStore.PlayNotificationSound=steamcordSound;
+  const beforeSounds=sounded.length;
+  listeners.playing({...track,videoId:'steamcord-native-opt-in'},false);flushSounds();
+  assert.equal(sounded.length,beforeSounds,'native opt-in keeps our silent song setting after a foreign replacement');
+  notificationStore.PlayNotificationSound({eType:2,data:{}});assert.equal(sounded.length,beforeSounds+1,'other plugin sounds still pass through');
+  stopAgain();assert.equal(notificationStore.PlayNotificationSound,steamcordSound,'cleanup preserves Steamcord sound routing');
+  const stopThird=exportsObject.initNotifications();await exportsObject.loadNotificationSettings();
+  listeners.sender('Before foreign overwrite');
+  const replacement=()=> 'foreign sound';notificationStore.PlayNotificationSound=replacement;
+  stopThird();assert.equal(notificationStore.PlayNotificationSound,replacement,'unload cannot unpatch an unrelated method installed outside the Decky chain');
   console.log('PASS notifications: silent defaults, independent toggles/sounds, metadata, deduplication, bounded toasts and cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

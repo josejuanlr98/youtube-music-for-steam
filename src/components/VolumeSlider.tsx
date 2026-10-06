@@ -12,6 +12,11 @@ let cachedVolume: number | null = null;
 // The wrapper only removes the stock Quick Access minimum width and padding.
 export const PaddedSlider = (props: SliderFieldProps) => {
   const ref = useRef<HTMLDivElement>(null);
+  // Steam uses a track pseudo-element in some builds and a handle in others.
+  const handles = [
+    gamepadSliderClasses?.SliderHandle && `.ytm-player-view .ytm-compact-slider .${gamepadSliderClasses.SliderHandle}`,
+    gamepadSliderClasses?.SliderTrack && `.ytm-player-view .ytm-compact-slider .${gamepadSliderClasses.SliderTrack}::after`,
+  ].filter(Boolean).join(',');
   useEffect(() => {
     if (!ref.current) return;
     const firstChild = ref.current.lastElementChild as HTMLElement | null;
@@ -25,6 +30,7 @@ export const PaddedSlider = (props: SliderFieldProps) => {
   }, []);
   return <div ref={ref} className="ytm-compact-slider" style={{ width:'100%', minWidth:0, maxWidth:'100%', borderRadius:8 }}>
     <style>{`.ytm-compact-slider .${gamepadSliderClasses?.SliderTrack} { --left-track-color:rgb(var(--ytm-cover-accent,78,108,132)) !important; --colored-toggles-main-color:rgb(var(--ytm-cover-accent,78,108,132)) !important; }`}</style>
+    {handles && <style>{`${handles} { background:var(--ytm-detail-color,rgb(198,210,223)) !important; border-color:var(--ytm-detail-color,rgb(198,210,223)) !important; }`}</style>}
     <SliderField {...props} />
   </div>;
 };

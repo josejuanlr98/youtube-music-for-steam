@@ -41,7 +41,7 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 - **Cast to your Steam system:** receive YouTube and YouTube Music Cast sessions from a phone or another device on your trusted network. Playback state, track changes, and supported controls stay in sync with the sender.
 - **Import your account from Firefox-family browsers:** in Desktop Mode, sign in to YouTube Music in Firefox, Zen, LibreWolf, Waterfox, or Floorp, then use **Import cookies**. Manual request-header import is available for other browsers. The plugin saves the session locally; it never asks for your Google password.
 - **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored backdrop, and requests temporary screen-awake protection while lyrics are open. Optional lyric translation uses a separate language selector and preserves the original lines.
-- **Keep the experience cohesive:** artwork colors inform the player, library, and lyrics; track and Cast notifications use Steam's native notification system. Manually selected local songs stay quiet; automatic track changes can notify you.
+- **Keep the experience cohesive:** artwork colors inform the player, library, and lyrics; volume/progress slider thumbs share the light color used by artist names and lyric translations. Track and Cast notifications use Steam's notification system and respect Steamcord's compatible routing when it is active. Manually selected local songs stay quiet; automatic track changes can notify you. With Steamcord in safe mode, its notification appearance, sound policy and streamer settings apply.
 - **Stop cleanly:** Stop ends the Cast session and clears the active queue.
 
 ## Install
