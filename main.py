@@ -226,6 +226,11 @@ class Plugin:
         self._load_settings()
         await asyncio.to_thread(self._try_init_ytmusic)
         await self._start_cast_backend()
+        # Run the same restart as Settings once per plugin load (including boot).
+        # Opening the plugin panel does not call this lifecycle hook.
+        result = await self.hard_reset()
+        if not result.get('success'):
+            decky.logger.error(result.get('error', 'Automatic Cast startup restart failed.'))
 
     async def _start_cast_backend(self):
         if not os.path.exists(SERVER_JS):
