@@ -1,5 +1,15 @@
 # Historial de cambios
 
+## 0.7.4
+
+- Restore working audio extraction using official Node 22.23.3. The previously bundled Node 20 was incompatible with the JavaScript challenge component required by current yt-dlp.
+- Direct and Cast audio extraction now use the imported YouTube session when available, through private temporary cookie files restricted to YouTube. Anonymous Cast remains available without a plugin account.
+- Upgrade ytmusicapi to 1.12.3 for playlist, search and parser fixes, preserving compatibility with optional lyrics/related tabs.
+- Check official stable yt-dlp updates daily in the background. Verify release checksums, version and JavaScript runtime compatibility before replacing the extractor atomically. Keep updates across receiver/device restarts and retain the working version if an update fails.
+- Automatically run the existing Settings Cast receiver restart once when Decky loads the plugin, including after a device reboot.
+- Show actionable playback errors and stop probing additional songs when YouTube rejects the provider request or the audio engine fails. Only explicitly unavailable videos are candidates for skipping.
+- Playback was confirmed working on Steam Deck with beta.6. Validation includes 104 Python tests, 55 backend tests, 20 frontend regression suites, production builds, the actual yt-dlp Node provider smoke check and installer integrity/import checks.
+
 ## 0.7.3
 
 - Volume and progress slider thumbs now share the light cover color used by artist names, the translation badge and translated lyrics. Both separate handles and Steam track pseudo-element thumbs are covered.
