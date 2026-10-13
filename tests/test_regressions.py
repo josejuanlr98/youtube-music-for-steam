@@ -14,7 +14,7 @@ sys.modules['decky'] = types.SimpleNamespace(
 spec = importlib.util.spec_from_file_location('plugin', ROOT / 'main.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-from ytmusicapi.parsers.watch import get_tab_browse_id
+from ytmusicapi.parsers.watch import get_tab_browse_ids
 from ytmusicapi import YTMusic
 
 
@@ -207,12 +207,12 @@ class WatchParserTests(unittest.TestCase):
     def test_optional_tabs(self):
         for response in [{}, {'tabs': []}, {'tabs': [{}, {'tabRenderer': {}}]},
                          {'tabs': [{}, {'tabRenderer': {'unselectable': True}}]}]:
-            self.assertIsNone(get_tab_browse_id(response, 1))
+            self.assertEqual(get_tab_browse_ids(response), {})
 
     def test_supported_endpoint_shapes(self):
         for key in ['endpoint', 'navigationEndpoint']:
             response = {'tabs': [{}, {'tabRenderer': {key: {'browseEndpoint': {'browseId': 'MPLYt_test'}}}}]}
-            self.assertEqual(get_tab_browse_id(response, 1), 'MPLYt_test')
+            self.assertEqual(get_tab_browse_ids(response), {'MUSIC_PAGE_TYPE_TRACK_LYRICS': 'MPLYt_test'})
 
     def test_real_watch_parser_survives_missing_related_endpoint(self):
         # Exercise the bundled API, not only the plugin's mocked return values.

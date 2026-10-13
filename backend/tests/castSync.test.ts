@@ -38,6 +38,19 @@ describe('Cast playback synchronization', () => {
     expect(player.isCurrentlyPlaying()).toBe(false);
     expect(player.getPlaybackId()).toBeNull();
   });
+
+  it.each(['RUNTIME_UNSUPPORTED','YOUTUBE_BLOCKED','AUDIO_NETWORK'])('stops global %s errors without skipping through the sender queue', async code => {
+    const player = recoveringPlayer();
+    const error = Object.assign(new Error('Audio provider is unavailable'), {code,unavailable:false});
+    vi.mocked(extractAudioInfo).mockReset().mockRejectedValue(error);
+    const ids = [...player.queue.videoIds];
+    expect(await player.play({id:'b',client:'YTMUSIC'} as any)).toBe(false);
+    expect(extractAudioInfo).toHaveBeenCalledTimes(1);
+    expect(player.queue.videoIds).toEqual(ids);
+    expect(player.isCurrentlyPlaying()).toBe(false);
+    expect(player.getPlaybackId()).toBeNull();
+    expect((player as any).ws.broadcast).toHaveBeenCalledWith('error',expect.objectContaining({code}));
+  });
   it.each(['pause','stop','disconnect'])('does not auto-advance after %s during extraction', async action => {
     const player = recoveringPlayer();
     let reject!: (error:Error) => void;

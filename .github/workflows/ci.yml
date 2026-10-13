@@ -17,7 +17,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -35,6 +35,11 @@ jobs:
           pnpm run typecheck:backend
           pnpm run build
           pnpm run build:backend
+      - name: Verify shipped audio engine and JavaScript runtime
+        run: |
+          python scripts/fetch_node_runtime.py --version v22.23.3 --destination bin/node --cache outputs/runtime-cache
+          python scripts/fetch_ytdlp.py --version 2026.08.19 --destination bin/yt-dlp
+          python scripts/verify_audio_runtime.py
       - name: Test
         run: |
           pnpm test

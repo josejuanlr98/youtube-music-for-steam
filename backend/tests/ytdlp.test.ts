@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { extractAudioInfo } from '../src/ytdlp.js';
+import { extractAudioInfo, classifyAudioFailure } from '../src/ytdlp.js';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Mock child_process.spawn
 vi.mock('node:child_process', () => {
@@ -36,6 +39,24 @@ const sampleYtdlpOutput = JSON.stringify({
 describe('extractAudioInfo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('passes the imported session through a private file and removes it after extraction', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ytm-extraction-test-'));
+    try {
+      const auth = join(directory, 'browser.json');
+      writeFileSync(auth, JSON.stringify({cookie:'SID=synthetic'}));
+      vi.stubEnv('YTCAST_BROWSER_AUTH_FILE', auth);
+      mockSpawn.mockReturnValue(createMockProcess(sampleYtdlpOutput));
+      const pending = extractAudioInfo('song', '/path/to/yt-dlp');
+      const args = mockSpawn.mock.calls[0][1] as string[];
+      expect(args[0]).toBe('--cookies');
+      expect(existsSync(args[1])).toBe(true);
+      expect(args.join(' ')).not.toContain('synthetic');
+      await pending;
+      expect(existsSync(args[1])).toBe(false);
+    } finally { vi.unstubAllEnvs(); rmSync(directory, {recursive:true, force:true}); }
   });
 
   it('extracts audio info from yt-dlp JSON output', async () => {
@@ -63,7 +84,7 @@ describe('extractAudioInfo', () => {
     mockSpawn.mockReturnValue(createMockProcess('', 1));
 
     await expect(extractAudioInfo('bad-id', '/path/to/yt-dlp'))
-      .rejects.toThrow('yt-dlp exited with code 1');
+      .rejects.toMatchObject({code:'AUDIO_LOOKUP_FAILED', unavailable:false});
   });
 
   it('rejects when JSON output is invalid', async () => {
@@ -83,9 +104,21 @@ describe('extractAudioInfo', () => {
       proc.stdout = new EventEmitter(); proc.stderr = new EventEmitter(); proc.kill = vi.fn();
       mockSpawn.mockReturnValue(proc);
       const result = expect(extractAudioInfo('song', '/path/to/yt-dlp')).rejects.toThrow('timed out');
-      await vi.advanceTimersByTimeAsync(45000);
+      await vi.advanceTimersByTimeAsync(25000);
       await result;
       expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
     } finally { vi.useRealTimers(); }
+  });
+
+  it('distinguishes global engine/provider failures from an unavailable song', () => {
+    expect(classifyAudioFailure('HTTP Error 429: Too Many Requests').code).toBe('YOUTUBE_BLOCKED');
+    expect(classifyAudioFailure('Sign in to confirm you are not a bot').code).toBe('YOUTUBE_VERIFICATION');
+    expect(classifyAudioFailure('[youtube] abc429xyz: Requested format is not available').code).toBe('AUDIO_LOOKUP_FAILED');
+    for (const text of ['No supported JavaScript runtime could be found', 'HTTP Error 429: Too Many Requests', 'Sign in to confirm you are not a bot', 'Connection timed out', 'Requested format is not available']) {
+      expect(classifyAudioFailure(text).unavailable).toBe(false);
+    }
+    for (const text of ['Private video', 'Video unavailable', 'This video is not available in your country', 'Copyright removal']) {
+      expect(classifyAudioFailure(text)).toMatchObject({code:'VIDEO_UNAVAILABLE',unavailable:true});
+    }
   });
 });

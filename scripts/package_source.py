@@ -11,6 +11,7 @@ SOURCE_FILES = (
     "py_modules/ytm_lyrics.py",
     "py_modules/ytm_translation.py",
     "py_modules/ytm_catalog.py",
+    "py_modules/ytm_audio_runtime.py",
     "package.json",
     "pnpm-lock.yaml",
     "rollup.config.js",

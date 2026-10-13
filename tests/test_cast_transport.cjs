@@ -37,6 +37,26 @@ function setup() {
 const track = (id) => ({ videoId:id, playbackId:`play-${id}`, title:id, url:`https://audio.test/${id}`, duration:180 });
 
 (async () => {
+  const blocked = setup(), errors = [];
+  blocked.api.addPlaybackErrorListener(message=>errors.push(message));
+  blocked.message('connection',{phoneConnected:true});
+  blocked.message('error',{message:'YouTube temporarily blocked audio requests (HTTP 429).',code:'YOUTUBE_BLOCKED'});
+  assert.match(blocked.api.getPlaybackError(),/HTTP 429/);
+  blocked.message('stop',{});
+  assert.match(blocked.api.getPlaybackError(),/HTTP 429/,'stop must retain the reason playback failed');
+  blocked.message('track',track('recovered'));await tick();
+  assert.equal(blocked.api.getPlaybackError(),'','new playable media clears the previous failure');
+  assert.equal(errors[0],'YouTube temporarily blocked audio requests (HTTP 429).');
+  blocked.api.destroyAudio();
+  const localBlocked = setup();
+  await localBlocked.api.playTrack(track('local'));
+  localBlocked.rpc(async name=>name==='get_current_track'?{error:'YouTube requires verification',code:'YOUTUBE_VERIFICATION'}:{success:true});
+  localBlocked.events.error();await tick();
+  assert.equal(localBlocked.api.getPlaybackError(),'YouTube requires verification');
+  assert(!localBlocked.calls.includes('skip_unplayable'),'a global provider error must not probe more songs');
+  assert.equal(localBlocked.audio.paused,true);
+  localBlocked.api.destroyAudio();
+  console.log('PASS provider errors are visible, persist through Cast stop, clear on recovery and stop local skip loops');
   const relink = setup(), connected = [];
   relink.api.addSenderConnectedListener(name => connected.push(name));
   relink.message('senderConnected',{senderName:'Phone'});

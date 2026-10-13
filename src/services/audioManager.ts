@@ -38,7 +38,7 @@ async function skipFailedLocalTrack() {
   const result = await call<[string], TrackInfo & { stopped?:boolean; error?:string }>('skip_unplayable', currentTrack.videoId);
   if (generation !== playbackGeneration || stoppingAll) return;
   if (result.stopped) { clearPlayback(); return; }
-  if (result.error || !result.url) { notifyPlaying(false); return; }
+  if (result.error || !result.url) { notifyPlaybackError(result.error || 'Could not load audio. Please retry.'); notifyPlaying(false); return; }
   await loadAndPlay(result);
   } finally { skippingLocal = false; }
 }
@@ -102,6 +102,17 @@ function applyVolume(value:number, muted = false) {
 }
 
 let trackChangeListeners: Array<(track: TrackInfo | null) => void> = [];
+let playbackError = '';
+let playbackErrorListeners: Array<(message:string) => void> = [];
+export function getPlaybackError() { return playbackError; }
+export function addPlaybackErrorListener(fn:(message:string) => void) {
+  playbackErrorListeners.push(fn);
+  return () => { playbackErrorListeners = playbackErrorListeners.filter(listener => listener !== fn); };
+}
+function notifyPlaybackError(message:string) {
+  playbackError = message;
+  playbackErrorListeners.forEach(listener => listener(message));
+}
 let playbackStartedListeners: Array<(track: TrackInfo, manual: boolean) => void> = [];
 let senderConnectedListeners: Array<(name: string | null, avatar?:string) => void> = [];
 export function addPlaybackStartedListener(fn: (track: TrackInfo, manual: boolean) => void) {
@@ -169,6 +180,7 @@ function notifyQueue(tracks: TrackInfo[], position: number) {
 function notifyProgress(position: number, duration: number) { progressPosition = Math.max(0, position || 0); progressDuration = Math.max(0, duration || 0); progressListeners.forEach((fn) => fn(progressPosition, progressDuration)); }
 function notifyTrack(track: TrackInfo | null) {
   currentTrack = track;
+  if (track) notifyPlaybackError('');
   trackChangeListeners.forEach((fn) => fn(track));
 }
 /** Metadata may only be cleared after the media element has been silenced. */
@@ -331,6 +343,9 @@ function handleCastMessage(msg: any) {
   if (msg.event === 'connection') connectionRevision++;
   if (stoppingAll && ['track', 'state', 'queue'].includes(msg.event)) return;
   switch (msg.event) {
+    case 'error':
+      if (usesCast() && typeof msg.data?.message === 'string') notifyPlaybackError(msg.data.message);
+      break;
     case 'volume':
       if (usesCast()) applyVolume(msg.data?.value, !!msg.data?.muted);
       break;
@@ -491,7 +506,7 @@ async function handleLocalTrackEnded() {
     if (result.stopped) {
       clearPlayback(); return;
     }
-    if (result.error || !result.url) { notifyPlaying(false); return; }
+    if (result.error || !result.url) { notifyPlaybackError(result.error || 'Could not load audio. Please retry.'); notifyPlaying(false); return; }
     await loadAndPlay(result);
   } catch { notifyPlaying(false); }
 }
@@ -502,8 +517,9 @@ async function handleLocalError() {
   localRetryId = currentTrack.videoId;
   const generation = playbackGeneration;
   try {
-    const result = await call<[], TrackInfo & { error?: string }>('get_current_track');
+    const result = await call<[], TrackInfo & { error?: string; code?:string }>('get_current_track');
     if (generation !== playbackGeneration) return;
+    if (result.error && result.code) { notifyPlaybackError(result.error); audioElement?.pause(); notifyPlaying(false); return; }
     if (result.error || !result.url) { await skipFailedLocalTrack(); return; }
     await loadAndPlay(result, true);
   } catch { notifyPlaying(false); }
@@ -565,6 +581,8 @@ export function initAudio() {
 
 export function destroyAudio() {
   volumeListeners = [];
+  playbackErrorListeners = [];
+  playbackError = '';
   playbackGeneration++;
   stopCastProgress();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -633,7 +651,8 @@ export async function playNext() {
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('next_track');
   if (generation !== playbackGeneration) return;
   if (result.stopped) { clearPlayback(); return; }
-  if (result.error || !result.url) return;
+  if (result.error) throw new Error(result.error);
+  if (!result.url) return;
   await loadAndPlay(result);
 }
 export async function playPrevious() {
@@ -642,7 +661,8 @@ export async function playPrevious() {
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('previous_track');
   if (generation !== playbackGeneration) return;
   if (result.stopped) return;
-  if (result.error || !result.url) return;
+  if (result.error) throw new Error(result.error);
+  if (!result.url) return;
   await loadAndPlay(result);
 }
 export function setAudioVolume(value: number) {

@@ -6,9 +6,9 @@ $ErrorActionPreference = "Stop"
 
 $PluginName = "YouTube Music"   # Must match plugin.json "name" exactly
 $ZipSlug   = "youtube-music-for-steam"  # Used for the output ZIP filename
-$NodeVersion = "v20.18.3"
+$NodeVersion = "v22.23.3"
 $NodeUrl = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-linux-x64.tar.xz"
-$YtdlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+$YtdlpVersion = "2026.08.19"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonModulesDir = Join-Path $ScriptDir "py_modules"
@@ -28,12 +28,15 @@ Pop-Location
 
 # --- Step 1b: Install Python runtime dependencies ---
 Write-Host "`n[1b/6] Installing Python dependencies..." -ForegroundColor Yellow
-if (!(Test-Path (Join-Path $PythonModulesDir "ytmusicapi")) -or !(Test-Path (Join-Path $PythonModulesDir "langdetect"))) {
-    New-Item -ItemType Directory -Path $PythonModulesDir -Force | Out-Null
-    python -m pip install --disable-pip-version-check --target $PythonModulesDir -r (Join-Path $ScriptDir "requirements.txt")
-    if ($LASTEXITCODE -ne 0) { throw "Python dependency install failed" }
-} else {
-    Write-Host "  py_modules already contains runtime dependencies, skipping install" -ForegroundColor DarkGray
+New-Item -ItemType Directory -Path $PythonModulesDir -Force | Out-Null
+python -m pip install --disable-pip-version-check --upgrade --target $PythonModulesDir -r (Join-Path $ScriptDir "requirements.txt")
+if ($LASTEXITCODE -ne 0) { throw "Python dependency install failed" }
+# pip --target can leave metadata from an older version after replacing its code.
+$ResolvedModules = [IO.Path]::GetFullPath($PythonModulesDir).TrimEnd('\') + '\'
+Get-ChildItem -LiteralPath $PythonModulesDir -Directory -Filter "ytmusicapi-*.dist-info" | Where-Object { $_.Name -ne "ytmusicapi-1.12.3.dist-info" } | ForEach-Object {
+    $OldMetadata = [IO.Path]::GetFullPath($_.FullName)
+    if (!$OldMetadata.StartsWith($ResolvedModules, [StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected dependency metadata path" }
+    Remove-Item -LiteralPath $OldMetadata -Recurse -Force
 }
 
 # Cookie import uses Firefox-family SQLite profiles and needs no OS keyring.
@@ -65,55 +68,17 @@ Write-Host "`n[4/6] Downloading Node.js $NodeVersion (linux-x64)..." -Foreground
 if (!(Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir | Out-Null }
 
 $NodeBin = Join-Path $BinDir "node"
-if (!(Test-Path $NodeBin)) {
-    $TarXzPath = Join-Path $ScriptDir "node-linux-x64.tar.xz"
-    $TarPath = Join-Path $ScriptDir "node-linux-x64.tar"
-    $ExtractDir = Join-Path $ScriptDir "node-extract"
-
-    Write-Host "  Downloading $NodeUrl..."
-    Invoke-WebRequest -Uri $NodeUrl -OutFile $TarXzPath -UseBasicParsing
-
-    # Extract .tar.xz using Windows system tar (bsdtar) to avoid Git Bash tar path issues
-    Write-Host "  Extracting Node.js binary..."
-    $SystemTar = Join-Path $env:SystemRoot "System32\tar.exe"
-    if (!(Test-Path $SystemTar)) {
-        # Fallback: try tar from PATH but with explicit working directory
-        $SystemTar = "tar"
-    }
-    if (!(Test-Path $ExtractDir)) { New-Item -ItemType Directory -Path $ExtractDir | Out-Null }
-    # Use Push-Location to avoid path format issues with tar -C flag
-    Push-Location $ExtractDir
-    & $SystemTar -xf $TarXzPath
-    $tarExit = $LASTEXITCODE
-    Pop-Location
-    if ($tarExit -ne 0) { Write-Warning "tar reported exit code $tarExit; checking for node binary anyway." }
-
-    # Find and copy the node binary
-    $NodeSrc = Get-ChildItem -Path $ExtractDir -Recurse -Filter "node" | Where-Object { !$_.PSIsContainer -and ($_.FullName -like "*bin\node" -or $_.FullName -like "*bin/node") } | Select-Object -First 1
-    if (!$NodeSrc) { throw "Could not find node binary in extracted archive" }
-    Copy-Item $NodeSrc.FullName $NodeBin
-    if (!(Test-Path $NodeBin) -or (Get-Item $NodeBin).Length -lt 50000000) { throw "Downloaded Node binary is missing or unexpectedly small." }
-
-    # Cleanup
-    Remove-Item -Recurse -Force $ExtractDir -ErrorAction SilentlyContinue
-    Remove-Item -Force $TarXzPath -ErrorAction SilentlyContinue
-    Remove-Item -Force $TarPath -ErrorAction SilentlyContinue
-
-    Write-Host "  Node.js binary saved to bin/node" -ForegroundColor Green
-} else {
-    Write-Host "  bin/node already exists, skipping download" -ForegroundColor DarkGray
-}
+python (Join-Path $ScriptDir "scripts/fetch_node_runtime.py") --version $NodeVersion --destination $NodeBin --cache (Join-Path $ScriptDir "outputs/runtime-cache") --windows-probe (Join-Path $ScriptDir "outputs/node-probe.exe")
+if ($LASTEXITCODE -ne 0) { throw "Verified Node runtime download failed" }
 
 # --- Step 5: Download yt-dlp binary (linux) ---
 Write-Host "`n[5/6] Downloading yt-dlp (linux)..." -ForegroundColor Yellow
 $YtdlpBin = Join-Path $BinDir "yt-dlp"
-if (!(Test-Path $YtdlpBin)) {
-    Write-Host "  Downloading $YtdlpUrl..."
-    Invoke-WebRequest -Uri $YtdlpUrl -OutFile $YtdlpBin -UseBasicParsing
-    Write-Host "  yt-dlp binary saved to bin/yt-dlp" -ForegroundColor Green
-} else {
-    Write-Host "  bin/yt-dlp already exists, skipping download" -ForegroundColor DarkGray
-}
+python (Join-Path $ScriptDir "scripts/fetch_ytdlp.py") --version $YtdlpVersion --destination $YtdlpBin
+if ($LASTEXITCODE -ne 0) { throw "Verified yt-dlp download failed" }
+
+python (Join-Path $ScriptDir "scripts/verify_audio_runtime.py") --root $ScriptDir --probe-node (Join-Path $ScriptDir "outputs/node-probe.exe")
+if ($LASTEXITCODE -ne 0) { throw "Extractor and Node runtime are incompatible" }
 
 # --- Step 6: Package into ZIP ---
 Write-Host "`n[6/6] Packaging into $PluginName.zip..." -ForegroundColor Yellow

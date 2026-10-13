@@ -356,6 +356,11 @@ export class CastPlayer extends Player {
       });
     } catch (err) {
       if (generation !== this.playbackGeneration) return;
+      if ((err as {unavailable?: boolean}).unavailable === false) {
+        this.ws.broadcast('error', { message:(err as Error).message, code:(err as {code?:string}).code ?? 'AUDIO_LOOKUP_FAILED' });
+        await this.stop();
+        return;
+      }
       this.ws.broadcast('error', {
         message: `Failed to re-extract URL: ${(err as Error).message}`,
         code: 'YTDLP_RETRY_FAILED',
@@ -587,12 +592,16 @@ export class CastPlayer extends Player {
       return true;
     } catch (err) {
       if (generation !== this.playbackGeneration) return false;
-      this.extractionFailure = { id:video.id, generation };
+      // Engine/network/provider failures affect the whole queue. Only a
+      // specifically unavailable song should advance to another candidate.
+      this.extractionFailure = (err as {unavailable?:boolean}).unavailable === false
+        ? null : { id:video.id, generation };
       console.error(`[YTCast] doPlay failed for ${video.id}:`, (err as Error).message);
       this.ws.broadcast('error', {
         message: `Failed to play: ${(err as Error).message}`,
-        code: 'YTDLP_FAILED',
+        code: (err as {code?:string}).code ?? 'YTDLP_FAILED',
       });
+      if ((err as {unavailable?:boolean}).unavailable === false) await this.doStop();
       return false;
     }
   }

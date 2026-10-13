@@ -13,8 +13,12 @@ import re
 import base64
 import urllib.parse
 import urllib.request
+import sys
 
 _PY_MODULES = os.path.join(decky.DECKY_PLUGIN_DIR, "py_modules")
+if _PY_MODULES not in sys.path:
+    sys.path.insert(0, _PY_MODULES)
+from ytm_audio_runtime import AudioLookupError, audio_failure as _audio_failure, atomic_write, stage_extractor, check_for_update, audio_cookies
 BROWSER_AUTH_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "browser.json")
 SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 CAST_SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "cast-settings.json")
@@ -28,7 +32,7 @@ YTDLP_BIN_SRC = os.path.join(PLUGIN_DIR, "bin", "yt-dlp")
 SERVER_JS = os.path.join(PLUGIN_DIR, "backend", "out", "server.cjs")
 RUNTIME_DIR = "/tmp/youtube-music-cast-receiver"
 NODE_BIN = os.path.join(RUNTIME_DIR, "node")
-YTDLP_BIN = os.path.join(RUNTIME_DIR, "yt-dlp")
+YTDLP_BIN = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime", "yt-dlp")
 
 
 def _stage_runtime_binaries():
@@ -37,7 +41,11 @@ def _stage_runtime_binaries():
         if not os.path.exists(src):
             continue
         try:
-            shutil.copy2(src, dst)
+            if src == YTDLP_BIN_SRC:
+                stage_extractor(src, dst)
+            else:
+                with open(src, "rb") as source:
+                    atomic_write(dst, source.read(), 0o755)
         except OSError as e:
             logger.warning(f"Could not refresh {dst}: {e}; using existing copy")
         try:
@@ -231,6 +239,17 @@ class Plugin:
         result = await self.hard_reset()
         if not result.get('success'):
             decky.logger.error(result.get('error', 'Automatic Cast startup restart failed.'))
+        self._audio_update_task = asyncio.create_task(self._check_audio_updates())
+
+    async def _check_audio_updates(self):
+        while True:
+            try:
+                status = await asyncio.to_thread(check_for_update, YTDLP_BIN, NODE_BIN)
+                if status['status'] != 'cached':
+                    decky.logger.info(f"Audio engine update: {status['status']} {status.get('version', status.get('error', ''))}")
+            except Exception as error:
+                decky.logger.warning(f'Audio engine update could not run: {type(error).__name__}')
+            await asyncio.sleep(3600)
 
     async def _start_cast_backend(self):
         if not os.path.exists(SERVER_JS):
@@ -245,6 +264,7 @@ class Plugin:
             "NODE_ENV": "production",
             "YTCAST_YTDLP_PATH": YTDLP_BIN if os.path.exists(YTDLP_BIN) else YTDLP_BIN_SRC,
             "YTCAST_DEVICE_NAME": self.cast_device_name,
+            "YTCAST_BROWSER_AUTH_FILE": BROWSER_AUTH_FILE,
         }
         try:
             self.node_process = subprocess.Popen(
@@ -336,6 +356,13 @@ class Plugin:
             return {'success': False, 'error': 'Could not restart the Cast receiver.'}
 
     async def _unload(self):
+        update = getattr(self, "_audio_update_task", None)
+        if update:
+            update.cancel()
+            try:
+                await update
+            except asyncio.CancelledError:
+                pass
         decky.logger.info("Stopping integrated YouTube Cast Receiver...")
         await self._stop_cast_backend()
         decky.logger.info("YouTube Music plugin unloaded")
@@ -482,6 +509,22 @@ class Plugin:
 
     # ── Streaming URL ──────────────────────────────────────────────
 
+    def _check_audio_runtime(self, node, env):
+        try:
+            stamp = os.stat(node)
+            signature = (node, stamp.st_mtime_ns, stamp.st_size)
+            if getattr(self, '_audio_runtime_signature', None) == signature:
+                return
+            result = subprocess.run([node, '--version'], capture_output=True, text=True, env=env, timeout=5)
+            match = re.match(r'^v(\d+)\.', result.stdout.strip())
+            if result.returncode != 0 or not match or int(match[1]) < 22:
+                raise AudioLookupError('The audio engine needs Node 22 or newer. Reinstall the current plugin ZIP.', 'RUNTIME_UNSUPPORTED')
+            self._audio_runtime_signature = signature
+        except AudioLookupError:
+            raise
+        except (OSError, subprocess.TimeoutExpired):
+            raise AudioLookupError('Could not start the audio engine. Reinstall the current plugin ZIP.', 'AUDIO_ENGINE_FAILED')
+
     def _get_streaming_url(self, video_id):
         """Fetch the best audio streaming URL using yt-dlp as a subprocess.
         Runs in a separate Python process to avoid Decky sandbox import issues."""
@@ -493,6 +536,8 @@ class Plugin:
             # Strip LD_LIBRARY_PATH to avoid Decky's bundled OpenSSL conflicting
             # with the system Python's ssl module (same fix as Deckify)
             env.pop('LD_LIBRARY_PATH', None)
+            node = NODE_BIN if os.path.exists(NODE_BIN) else NODE_BIN_SRC
+            self._check_audio_runtime(node, env)
 
             # Prefer the bundled/staged standalone yt-dlp. This keeps local
             # playback on the same current extractor as Cast playback and avoids
@@ -500,7 +545,7 @@ class Plugin:
             ytdlp = YTDLP_BIN if os.path.exists(YTDLP_BIN) else None
             command = ([ytdlp] if ytdlp else ['python3', '-m', 'yt_dlp']) + [
                 '--ignore-config', '--socket-timeout', '15', '--retries', '1',
-                '--js-runtimes', 'node:' + (NODE_BIN if os.path.exists(NODE_BIN) else NODE_BIN_SRC),
+                '--js-runtimes', 'node:' + node,
                 '--remote-components', 'ejs:github',
                 '--print', 'urls',
                 '-f', 'bestaudio[ext=m4a]/bestaudio',
@@ -510,28 +555,28 @@ class Plugin:
                 f'https://music.youtube.com/watch?v={video_id}',
             ]
 
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                env=env,
-                # Keep a single bad/blocked video from delaying playlist start
-                # for nearly a minute before the next candidate is tried.
-                timeout=25,
-            )
+            with audio_cookies(BROWSER_AUTH_FILE) as cookies:
+                if cookies:
+                    offset = 1 if ytdlp else 3
+                    command[offset:offset] = ['--cookies', cookies]
+                result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=25)
 
             url = result.stdout.strip()
             if result.returncode != 0 or not url or not url.startswith('http'):
-                decky.logger.warning(f"yt-dlp failed for {video_id}. rc={result.returncode} stderr: {result.stderr[-500:]}")
+                failure = _audio_failure(result.stderr)
+                decky.logger.warning(f"Audio lookup failed for {video_id}: {failure.code if failure else 'VIDEO_UNAVAILABLE'}")
+                if failure:
+                    raise failure
                 return None
             decky.logger.info(f"Got streaming URL for {video_id}")
             return url
         except subprocess.TimeoutExpired:
-            decky.logger.error(f"yt-dlp timed out for {video_id}")
-            return None
+            raise AudioLookupError('Audio lookup timed out. Check your connection and retry.', 'AUDIO_TIMEOUT', True)
+        except AudioLookupError:
+            raise
         except Exception as e:
-            decky.logger.error(f"Failed to get streaming URL for {video_id}: {e}")
-            return None
+            decky.logger.error(f"Audio engine failed for {video_id}: {type(e).__name__}")
+            raise AudioLookupError('Could not start the audio engine. Reinstall the current plugin ZIP.', 'AUDIO_ENGINE_FAILED')
 
     def _current_track_with_url(self, resolve_url=True):
         """Return current track metadata + fresh streaming URL."""
@@ -624,7 +669,12 @@ class Plugin:
         if result is None:
             return {'stopped': True}
         target = self.queue_position
-        url = await asyncio.to_thread(self._get_streaming_url, result['videoId'])
+        try:
+            url = await asyncio.to_thread(self._get_streaming_url, result['videoId'])
+        except AudioLookupError as error:
+            if self.queue is snapshot and self.queue_position == target:
+                self.queue_position, self.is_playing = previous, playing
+            return error.result()
         if self.queue is not snapshot or self.queue_position != target:
             return {'error': 'Playback changed while loading.'}
         if not url:
@@ -648,12 +698,18 @@ class Plugin:
         self.repeat = 'NONE'
         try:
             for _ in range(min(5, len(queue))):
+                previous, playing = self.queue_position, self.is_playing
                 track = self._advance_queue(1, resolve_url=False)
                 if not track:
                     self.is_playing = False
                     return {'stopped': True}
                 target = self.queue_position
-                url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+                try:
+                    url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+                except AudioLookupError as error:
+                    if self.queue is queue and self.queue_position == target and pause_revision == getattr(self, '_pause_revision', 0):
+                        self.queue_position, self.is_playing = previous, playing
+                    return error.result()
                 if self.queue is not queue or self.queue_position != target or pause_revision != getattr(self, '_pause_revision', 0):
                     return {'error': 'Playback changed while skipping.'}
                 if url:
@@ -929,7 +985,10 @@ class Plugin:
             return {'error': 'Invalid index'}
         snapshot = self.queue
         track = snapshot[index]
-        url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+        try:
+            url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+        except AudioLookupError as error:
+            return error.result()
         if snapshot is not self.queue or index >= len(self.queue) or self.queue[index] is not track:
             return {'error': 'Queue changed. Please try again.'}
         if not url:
@@ -1218,6 +1277,8 @@ class Plugin:
             self.shuffle_order = [0] if self.shuffle else []
             self.is_playing = True
             return {**track, "url": url, "queuePosition": 0, "queueLength": 1}
+        except AudioLookupError as error:
+            return error.result()
         except Exception as e:
             decky.logger.error(f"Failed to play song {video_id}: {e}")
             return {"error": "Could not load audio for this song. Please try again."}
@@ -1320,6 +1381,8 @@ class Plugin:
                 return {"error": "YouTube did not provide an audio stream for this song. Please try again in a moment."}
             self.is_playing = True
             return result
+        except AudioLookupError as error:
+            return error.result()
         except Exception as e:
             decky.logger.error(f"Failed to start song radio for {video_id}: {e}")
             msg = str(e)
@@ -1524,8 +1587,11 @@ class Plugin:
         for start_index in range(candidate_limit):
             video_id = tracks[start_index]['videoId']
             cached_start = starts.get(video_id)
-            url = (cached_start[2] if cached_start and cached_start[0] is client and time.monotonic() - cached_start[1] < 60
-                   else await asyncio.to_thread(self._get_streaming_url, video_id))
+            try:
+                url = (cached_start[2] if cached_start and cached_start[0] is client and time.monotonic() - cached_start[1] < 60
+                       else await asyncio.to_thread(self._get_streaming_url, video_id))
+            except AudioLookupError as error:
+                return error.result()
             if self.queue is not original_queue or self.queue != snapshot or self.ytmusic is not client:
                 return {'error': 'Playback changed while loading.'}
             if url:

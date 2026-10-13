@@ -6,7 +6,7 @@ import { IoPlay, IoPlaySkipBack, IoPlaySkipForward, IoShuffleOutline as MdShuffl
 import { MdRepeat, MdRepeatOne, MdCastConnected } from 'react-icons/md';
 import { AiOutlineLike, AiFillLike, AiOutlineDislike, AiFillDislike } from 'react-icons/ai';
 import { usePlayer } from '../context/PlayerContext';
-import { togglePlayback, playNext, playPrevious, stopAllPlayback, seekPlayback } from '../services/audioManager';
+import { togglePlayback, playNext, playPrevious, stopAllPlayback, seekPlayback, getPlaybackError, addPlaybackErrorListener } from '../services/audioManager';
 import { VolumeSlider, PaddedSlider } from './VolumeSlider';
 import { LyricsPanel, LYRICS_ROUTE } from './LyricsPage';
 import { SiYoutubemusic } from 'react-icons/si';
@@ -27,6 +27,8 @@ export const PlayerView = () => {
   currentVideo.current = track?.videoId;
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState('');
+  const [playbackError, setPlaybackError] = useState(getPlaybackError);
+  useEffect(() => addPlaybackErrorListener(setPlaybackError), []);
   const [showLyrics, setShowLyrics] = useState(false);
   const viewRef = useRef<HTMLDivElement>(null);
   const [accent, secondary, tertiary] = useArtworkPalette(track?.albumArt, viewRef);
@@ -108,6 +110,7 @@ export const PlayerView = () => {
         </div>
       </div>
 
+      {playbackError && <div className="ytm-error" role="alert" style={{fontSize:11,lineHeight:1.4}}>{playbackError}</div>}
       {authReady && !authenticated && <div className="ytm-muted" role="status" style={{ fontSize:11, textAlign:'center', lineHeight:1.4 }}>
         No sign-in needed for Cast. Sign in to unlock Library.
       </div>}

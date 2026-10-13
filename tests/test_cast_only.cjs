@@ -12,7 +12,7 @@ const modules = {
   '@decky/api': { call:async name => { calls.push(name); return { rating:'LIKE', playlists:[] }; } },
   '@decky/ui': { DialogButton:'button', Focusable:'focusable', Navigation:{} },
   '../context/PlayerContext': { usePlayer:() => state },
-  '../services/audioManager': {},
+  '../services/audioManager': {getPlaybackError:()=>'',addPlaybackErrorListener:()=>()=>{}},
   '../services/playlistActions': { performPlaylistAction:async()=>({started:false,added:0,cast:false}) },
   '../services/playlistNavigation': { PLAYLIST_ROUTE:'/youtube-music-playlist', LIBRARY_RETURN_EVENT:'ytm-return-library', selectPlaylist(){}, consumeLibraryReturn:()=>null, libraryReturnPending:()=>false, selectedPlaylist:()=>null },
   './Section': { Section:'section' },

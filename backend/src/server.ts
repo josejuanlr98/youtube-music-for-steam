@@ -6,7 +6,6 @@ import { CastPlayer } from './CastPlayer.js';
 import { JsonDataStore } from './JsonDataStore.js';
 import { WsManager } from './wsManager.js';
 import { handleRequest } from './httpServer.js';
-import { selfUpdate } from './ytdlp.js';
 import { getCurrentNetwork, type ActiveNetwork } from './network.js';
 
 const PORT = 39281;
@@ -26,10 +25,7 @@ const dataStorePath = '/home/deck/homebrew/settings/youtube-music/datastore.json
 async function main() {
   console.log('[YTCast] Starting YouTube Cast Receiver backend...');
 
-  // Self-update yt-dlp (async, non-blocking to startup)
-  selfUpdate(ytdlpPath).then(() => {
-    console.log('[YTCast] yt-dlp self-update check complete.');
-  });
+  // Python owns one verified updater, shared by direct and Cast playback.
 
   // Create HTTP server
   const httpServer = http.createServer();

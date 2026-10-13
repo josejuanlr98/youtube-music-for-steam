@@ -7,6 +7,7 @@ from test_regressions import module
 class CastStartupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.plugin = module.Plugin()
+        self.plugin._check_audio_updates = AsyncMock()
         self.plugin._load_settings = Mock()
         self.plugin._try_init_ytmusic = Mock()
         self.plugin._start_cast_backend = AsyncMock()
