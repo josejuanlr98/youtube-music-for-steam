@@ -21,8 +21,12 @@ export const PaddedSlider = (props: SliderFieldProps) => {
     if (!ref.current) return;
     const firstChild = ref.current.lastElementChild as HTMLElement | null;
     if (firstChild) {
-      firstChild.style.paddingLeft = '19px';
-      firstChild.style.paddingRight = '19px';
+      firstChild.style.paddingLeft = '14px';
+      firstChild.style.paddingRight = '14px';
+      firstChild.style.paddingTop = '2px';
+      firstChild.style.paddingBottom = '2px';
+      firstChild.style.marginBottom = '0';
+      firstChild.style.borderBottom = 'none';
     }
     ref.current.querySelectorAll<HTMLElement>('*').forEach((el) => {
       if (parseFloat(window.getComputedStyle(el).minWidth) >= 270) el.style.minWidth = '0';

@@ -1,7 +1,7 @@
 import { Player, Constants } from 'yt-cast-receiver';
 import { randomUUID } from 'node:crypto';
 import type { Volume, Video } from 'yt-cast-receiver';
-import { extractAudioInfo, type AudioInfo } from './ytdlp.js';
+import { extractAudioInfo, cleanArtist, type AudioInfo } from './ytdlp.js';
 import type { WsManager } from './wsManager.js';
 import type { JsonDataStore } from './JsonDataStore.js';
 
@@ -51,6 +51,7 @@ export class CastPlayer extends Player {
   }
   private playRequest = 0;
   private activePlayRequest = 0;
+  private inPlayTransition = false;
   private extractionFailure: { id:string; generation:number } | null = null;
   private playChain: Promise<void> = Promise.resolve();
   private deckOrder: string[] | null = null;
@@ -201,7 +202,12 @@ export class CastPlayer extends Player {
       for (let attempt = 0; attempt < 5; attempt++) {
         visited.add(candidate.id);
         this.extractionFailure = null;
-        if (await super.play(candidate, attempt === 0 ? position : 0, AID)) return true;
+        this.inPlayTransition = true;
+        try {
+          if (await super.play(candidate, attempt === 0 ? position : 0, AID)) return true;
+        } finally {
+          this.inPlayTransition = false;
+        }
         const failure = this.extractionFailure as {id:string; generation:number} | null;
         if (request !== this.playRequest || !failure || failure.id !== candidate.id ||
             failure.generation !== this.playbackGeneration || this.sessionCleared) return false;
@@ -306,6 +312,18 @@ export class CastPlayer extends Player {
     this.endedPlaybackId = id as string;
     this.stopHeartbeat();
     this.playing = false;
+    const nextVideoId = this.getNextQueueVideoId();
+    const nextMeta = nextVideoId ? (this.prefetchedAudio.get(nextVideoId)?.info ?? this.metadataCache.get(nextVideoId)) : null;
+    this.ws.broadcast('trackEnding', {
+      nextVideoId,
+      nextTrack: nextMeta ? {
+        videoId: nextMeta.videoId,
+        title: nextMeta.title,
+        artist: cleanArtist(nextMeta.artist),
+        albumArt: nextMeta.albumArt,
+        duration: nextMeta.duration,
+      } : null,
+    });
     if (this.deckOrder) { await this.next(); return; }
 
     if (this.queue.hasNext) {
@@ -439,6 +457,8 @@ export class CastPlayer extends Player {
         if (this.prefetchedAudio.size >= 8 && !this.prefetchedAudio.has(videoId)) {
           this.prefetchedAudio.delete(this.prefetchedAudio.keys().next().value!);
         }
+        const prevArt = this.metadataCache.get(videoId)?.albumArt;
+        if (prevArt && prevArt.includes('googleusercontent.com')) info.albumArt = prevArt;
         this.prefetchedAudio.set(videoId, { info, time: Date.now() });
         this.metadataCache.set(videoId, info);
       }
@@ -497,6 +517,9 @@ export class CastPlayer extends Player {
     if (uncachedIds.length > 0) {
       void this.enrichQueueMetadata(uncachedIds);
     }
+    if (this.playing && this.currentTrackInfo?.url) {
+      void this.prefetchNextTrack();
+    }
 
     return { tracks, position: currentIndex };
   }
@@ -554,7 +577,7 @@ export class CastPlayer extends Player {
       const data = await response.json() as { title?: string; author_name?: string; thumbnail_url?: string };
       return {
         title: data.title ?? videoId,
-        artist: data.author_name ?? '',
+        artist: cleanArtist(data.author_name ?? ''),
         albumArt: data.thumbnail_url ?? '',
       };
     } catch {
@@ -590,6 +613,7 @@ export class CastPlayer extends Player {
   // --- Player abstract method implementations ---
 
   protected async doPlay(video: Video, position: number): Promise<boolean> {
+    this.inPlayTransition = false;
     this.stopHeartbeat();
     if (this.activePlayRequest !== this.playRequest) return false;
     if (this.deckOrder && !this.deckOrder.includes(video.id)) this.deckOrder = null;
@@ -606,6 +630,8 @@ export class CastPlayer extends Player {
       this.sessionCleared = false;
       const info = await this.resolveTrackAudio(video.id);
       if (generation !== this.playbackGeneration) return false;
+      const prevArt = this.metadataCache.get(video.id)?.albumArt;
+      if (prevArt && prevArt.includes('googleusercontent.com')) info.albumArt = prevArt;
       this.currentTrackInfo = info;
       this.metadataCache.set(video.id, info);
       this.currentPosition = position;
@@ -639,6 +665,7 @@ export class CastPlayer extends Player {
         // Broadcast updated queue so the current track indicator moves
         const queueData = this.getQueueWithMetadata();
         this.ws.broadcast('queue', queueData);
+        void this.prefetchNextTrack();
       }, 0);
 
       return true;
@@ -691,7 +718,9 @@ export class CastPlayer extends Player {
     this.currentTrackInfo = null;
     this.currentPosition = 0;
     this.currentDuration = 0;
-    this.ws.broadcast('stop', {});
+    if (!this.inPlayTransition) {
+      this.ws.broadcast('stop', {});
+    }
     return true;
   }
 

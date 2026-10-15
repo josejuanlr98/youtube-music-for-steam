@@ -32,11 +32,19 @@ YTDLP_BIN_SRC = os.path.join(PLUGIN_DIR, "bin", "yt-dlp")
 SERVER_JS = os.path.join(PLUGIN_DIR, "backend", "out", "server.cjs")
 from collections import deque
 
-RUNTIME_DIR = "/tmp/youtube-music-cast-receiver"
+RUNTIME_DIR = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime")
 NODE_BIN = os.path.join(RUNTIME_DIR, "node")
 YTDLP_BIN = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime", "yt-dlp")
 YTDLP_CACHE_DIR = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime", "cache")
 CAST_DATASTORE_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "datastore.json")
+
+
+def clean_artist(name):
+    if not name or not isinstance(name, str):
+        return ""
+    cleaned = re.sub(r'\s*[-–—]\s*Topic\b', '', name, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*\(Topic\)', '', cleaned, flags=re.IGNORECASE).strip()
+    return cleaned or name.strip()
 
 
 def _stage_node_binary(src, dst):
@@ -53,7 +61,10 @@ def _stage_node_binary(src, dst):
     try:
         shutil.copyfile(src, tmp_dst)
         os.chmod(tmp_dst, 0o755)
-        os.utime(tmp_dst, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        try:
+            os.utime(tmp_dst, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        except OSError:
+            pass
         os.replace(tmp_dst, dst)
     finally:
         if os.path.exists(tmp_dst):
@@ -308,7 +319,25 @@ class Plugin:
         result = await self.hard_reset()
         if not result.get('success'):
             decky.logger.error(result.get('error', 'Automatic Cast startup restart failed.'))
+        elif not getattr(self, '_cast_advertising_ready', False):
+            self._pending_boot_cast_reset = True
         self._audio_update_task = asyncio.create_task(self._check_audio_updates())
+
+    async def _deferred_boot_cast_reset(self):
+        try:
+            await asyncio.sleep(1.5)
+            if self.is_playing or self.queue:
+                return
+            def receiver_idle():
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open('http://127.0.0.1:39281/api/state', timeout=2) as response:
+                    state = json.loads(response.read(1024 * 1024))
+                return not (state.get('connected') or state.get('isPlaying') or state.get('track'))
+            if await asyncio.to_thread(receiver_idle) and not self.is_playing and not self.queue:
+                decky.logger.info("Network became active after boot; running deferred Cast receiver restart...")
+                await self.hard_reset()
+        except Exception as error:
+            decky.logger.warning(f"Deferred Cast startup restart failed: {error}")
 
     async def _check_audio_updates(self):
         while True:
@@ -351,11 +380,15 @@ class Plugin:
             )
             loop = asyncio.get_running_loop()
 
+            self._cast_advertising_ready = False
+
             def wait_for_ready():
                 if self.node_process and self.node_process.stdout:
                     for line in iter(self.node_process.stdout.readline, b""):
                         decoded = line.decode("utf-8", errors="replace").strip()
                         decky.logger.info(f"[Cast] {decoded}")
+                        if "Cast receiver advertising" in decoded:
+                            self._cast_advertising_ready = True
                         if decoded == "READY":
                             return True
                 return False
@@ -379,7 +412,11 @@ class Plugin:
                         line = await loop.run_in_executor(None, stream.readline)
                         if not line:
                             break
-                        level_fn(f"[Cast] {line.decode('utf-8', errors='replace').strip()}")
+                        decoded = line.decode('utf-8', errors='replace').strip()
+                        level_fn(f"[Cast] {decoded}")
+                        if "Cast receiver advertising" in decoded and getattr(self, "_pending_boot_cast_reset", False):
+                            self._pending_boot_cast_reset = False
+                            self._boot_reset_task = asyncio.create_task(self._deferred_boot_cast_reset())
 
             asyncio.ensure_future(log_stream(self.node_process.stdout, decky.logger.info))
             asyncio.ensure_future(log_stream(self.node_process.stderr, decky.logger.warning))
@@ -420,6 +457,7 @@ class Plugin:
 
     async def hard_reset(self):
         """Restart the integrated Cast receiver and clear transient playback state."""
+        self._pending_boot_cast_reset = False
         try:
             await self.stop_all()
             await self._stop_cast_backend()
@@ -429,7 +467,58 @@ class Plugin:
             decky.logger.error(f"Hard reset failed: {error}")
             return {'success': False, 'error': 'Could not restart the Cast receiver.'}
 
+    _screensaver_cookie = None
+
+    async def inhibit_screensaver(self):
+        """Inhibit SteamOS display sleep and photo screensaver via Freedesktop ScreenSaver D-Bus."""
+        try:
+            cmd = [
+                "gdbus", "call", "--session",
+                "--dest", "org.freedesktop.ScreenSaver",
+                "--object-path", "/ScreenSaver",
+                "--method", "org.freedesktop.ScreenSaver.Inhibit",
+                "YouTube Music", "Fullscreen Lyrics"
+            ]
+            res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                match = re.search(r'\(uint32\s+(\d+),\)', res.stdout) or re.search(r'\((\d+),\)', res.stdout)
+                if match:
+                    self._screensaver_cookie = int(match.group(1))
+                    return {"cookie": self._screensaver_cookie}
+        except Exception as e:
+            decky.logger.debug(f"Could not inhibit screensaver via D-Bus: {e}")
+        return {"cookie": None}
+
+    async def uninhibit_screensaver(self, cookie=None):
+        """Release screensaver inhibition."""
+        c = cookie if cookie is not None else getattr(self, '_screensaver_cookie', None)
+        if c is not None:
+            self._screensaver_cookie = None
+            try:
+                cmd = [
+                    "gdbus", "call", "--session",
+                    "--dest", "org.freedesktop.ScreenSaver",
+                    "--object-path", "/ScreenSaver",
+                    "--method", "org.freedesktop.ScreenSaver.UnInhibit",
+                    str(c)
+                ]
+                await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=2)
+            except Exception as e:
+                decky.logger.debug(f"Could not uninhibit screensaver: {e}")
+        return {"success": True}
+
     async def _unload(self):
+        self._pending_boot_cast_reset = False
+        boot_reset = getattr(self, "_boot_reset_task", None)
+        if boot_reset:
+            boot_reset.cancel()
+        if self.node_process is not None:
+            try:
+                os.killpg(os.getpgid(self.node_process.pid), signal.SIGTERM)
+            except Exception:
+                pass
+        if getattr(self, '_screensaver_cookie', None) is not None:
+            await self.uninhibit_screensaver()
         update = getattr(self, "_audio_update_task", None)
         if update:
             update.cancel()
@@ -754,7 +843,8 @@ class Plugin:
 
     async def peek_queue_track(self, direction=1):
         """Return metadata of the adjacent track in <1ms without waiting for yt-dlp."""
-        idx = self._peek_queue_index(1 if direction >= 0 else -1)
+        advancing = getattr(self, "_advancing_target", None)
+        idx = advancing if advancing is not None else self._peek_queue_index(1 if direction >= 0 else -1)
         if idx is None or not (0 <= idx < len(self.queue)):
             return {'stopped': True}
         track = self.queue[idx]
@@ -891,6 +981,7 @@ class Plugin:
         if result is None:
             return {'stopped': True}
         target = self.queue_position
+        self._advancing_target = target
         video_id = result['videoId']
         try:
             url = await self._resolve_stream_url(video_id)
@@ -898,6 +989,9 @@ class Plugin:
             if self.queue is snapshot and self.queue_position == target:
                 self.queue_position, self.is_playing = previous, playing
             return error.result()
+        finally:
+            if getattr(self, "_advancing_target", None) == target:
+                self._advancing_target = None
         if self.queue is not snapshot or self.queue_position != target:
             return {'error': 'Playback changed while loading.'}
         if not url:
@@ -1435,7 +1529,7 @@ class Plugin:
                 thumbnails = r.get("thumbnails", [])
                 album_art = thumbnails[-1]["url"] if thumbnails else ""
                 artists = r.get("artists", [])
-                artist_name = ", ".join(a.get("name", "") for a in artists) if artists else ""
+                artist_name = clean_artist(", ".join(a.get("name", "") for a in artists) if artists else "")
                 songs.append({
                     "videoId": r.get("videoId", ""),
                     "title": r.get("title", "Unknown"),
@@ -1496,7 +1590,7 @@ class Plugin:
         track = {
             "videoId": video_id,
             "title": metadata.get("title") or "Unknown",
-            "artist": metadata.get("artist") or "",
+            "artist": clean_artist(metadata.get("artist") or ""),
             "album": str(metadata.get("album") or ""),
             "albumArt": metadata.get("albumArt") or "",
             "duration": duration,
@@ -1573,10 +1667,12 @@ class Plugin:
 
             queue = []
             for t in tracks:
-                thumbnails = t.get("thumbnail", []) or t.get("thumbnails", [])
+                counterpart = t.get("counterpart") if isinstance(t.get("counterpart"), dict) else None
+                c_thumbs = (counterpart.get("thumbnail") or counterpart.get("thumbnails") or []) if counterpart else []
+                thumbnails = c_thumbs if any("googleusercontent.com" in (x.get("url") or "") for x in c_thumbs if isinstance(x, dict)) else (t.get("thumbnail", []) or t.get("thumbnails", []))
                 album_art = thumbnails[-1].get("url", "") if thumbnails else ""
                 artists = t.get("artists", []) or []
-                artist_name = ", ".join(a.get("name", "") for a in artists) if artists else t.get("uploader", "")
+                artist_name = clean_artist(", ".join(a.get("name", "") for a in artists) if artists else t.get("uploader", ""))
                 album = t.get("album") or {}
                 album_name = album.get("name", "") if isinstance(album, dict) else ""
                 duration_seconds = t.get("duration_seconds", 0) or 0
@@ -1642,7 +1738,7 @@ class Plugin:
 
     async def translate_lyrics(self, lyrics, target):
         from ytm_translation import translate_lyrics
-        cache_file = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, 'lyric-translations.json')
+        cache_file = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, 'lyric-translations-nmt-v2.json')
         return await asyncio.to_thread(translate_lyrics, lyrics, target, cache_file)
 
     async def stop_all(self):
@@ -1670,7 +1766,7 @@ class Plugin:
             except (ValueError, TypeError):
                 duration = 0
         return {'videoId': t['videoId'], 'title': t.get('title') or 'Unknown',
-                'artist': ', '.join(a.get('name') or '' for a in artists if isinstance(a, dict)),
+                'artist': clean_artist(', '.join(a.get('name') or '' for a in artists if isinstance(a, dict))),
                 'album': album.get('name', '') if isinstance(album, dict) else '',
                 'albumArt': thumbs[-1].get('url', '') if thumbs else '',
                 'duration': duration, 'likeStatus': t.get('likeStatus') or 'INDIFFERENT'}
@@ -1719,18 +1815,20 @@ class Plugin:
                 return {'error': 'This playlist has no available songs.'}
             cache = {key: value for key, value in cache.items()
                      if value[0] is client and time.monotonic() - value[1] < 300}
-            while len(cache) >= 3:
+            while len(cache) >= 8:
                 cache.pop(next(iter(cache)))
-            if limit is None:
+            track_count = data.get('trackCount')
+            is_complete = limit is None or (isinstance(track_count, int) and 0 < track_count <= len(tracks))
+            if is_complete:
                 cache[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
             self._playlist_tracks_cache = cache
             if limit == 0:
                 previews = {key:value for key,value in previews.items() if value[0] is client and time.monotonic() - value[1] < 600}
-                while len(previews) >= 6:
+                while len(previews) >= 12:
                     previews.pop(next(iter(previews)))
                 previews[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
                 self._playlist_preview_cache = previews
-            return {'tracks': tracks, 'complete': limit is None}
+            return {'tracks': tracks, 'complete': is_complete}
         except Exception as e:
             decky.logger.warning(f'Playlist load failed: {type(e).__name__}')
             return self._account_error(e)

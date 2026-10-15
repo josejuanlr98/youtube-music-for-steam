@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import os from 'node:os';
 
 export interface ActiveNetwork {
   uuid: string;
@@ -8,32 +7,6 @@ export interface ActiveNetwork {
 }
 
 const NMCLI_TIMEOUT_MS = 3000;
-let lastInterfaceSig: string | null = null;
-let cachedActiveNetwork: ActiveNetwork | null = null;
-let hasCachedResult = false;
-
-function getInterfaceSignature(): string {
-  try {
-    const interfaces = os.networkInterfaces();
-    const parts: string[] = [];
-    for (const name of Object.keys(interfaces).sort()) {
-      for (const addr of interfaces[name] ?? []) {
-        if (!addr.internal) {
-          parts.push(`${name}:${addr.family}:${addr.address}:${addr.mac}`);
-        }
-      }
-    }
-    return parts.join('|');
-  } catch {
-    return '';
-  }
-}
-
-export function resetNetworkCache(): void {
-  lastInterfaceSig = null;
-  cachedActiveNetwork = null;
-  hasCachedResult = false;
-}
 
 /**
  * Run `nmcli -t -f UUID,NAME,TYPE connection show --active` and parse the
@@ -44,26 +17,12 @@ export function resetNetworkCache(): void {
  * literal `:` are escaped as `\:`. UUIDs never contain colons, but names
  * can — we split with that escape rule in mind.
  */
-export function getCurrentNetwork(forceRefresh = false): Promise<ActiveNetwork | null> {
-  const currentSig = getInterfaceSignature();
-  if (!forceRefresh && hasCachedResult && currentSig && currentSig === lastInterfaceSig && cachedActiveNetwork !== null) {
-    return Promise.resolve(cachedActiveNetwork);
-  }
-  if (!forceRefresh && hasCachedResult && currentSig === '' && lastInterfaceSig === '') {
-    return Promise.resolve(null);
-  }
+export function getCurrentNetwork(): Promise<ActiveNetwork | null> {
   return new Promise((resolve) => {
     let resolved = false;
-    const finish = (v: ActiveNetwork | null, cacheable = true) => {
+    const finish = (v: ActiveNetwork | null) => {
       if (resolved) return;
       resolved = true;
-      if (cacheable) {
-        lastInterfaceSig = currentSig;
-        cachedActiveNetwork = v;
-        hasCachedResult = true;
-      } else {
-        hasCachedResult = false;
-      }
       resolve(v);
     };
 
@@ -75,23 +34,23 @@ export function getCurrentNetwork(forceRefresh = false): Promise<ActiveNetwork |
         env: { ...process.env, LD_LIBRARY_PATH: '', PYTHONPATH: '' },
       });
     } catch {
-      finish(null, false);
+      finish(null);
       return;
     }
 
     const timer = setTimeout(() => {
       try { proc.kill('SIGKILL'); } catch {}
-      finish(null, false);
+      finish(null);
     }, NMCLI_TIMEOUT_MS);
 
     let stdout = '';
     proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.on('error', () => { clearTimeout(timer); finish(null, false); });
+    proc.on('error', () => { clearTimeout(timer); finish(null); });
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
         console.warn(`[YTCast] nmcli exited code ${code}; assuming no active network`);
-        finish(null, false);
+        finish(null);
         return;
       }
 

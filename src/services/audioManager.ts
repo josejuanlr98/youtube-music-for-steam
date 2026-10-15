@@ -14,6 +14,7 @@ let progressTimer: ReturnType<typeof setInterval> | null = null;
 
 let currentTrack: TrackInfo | null = null;
 let isPlaying = false;
+let trackStreamReady = false;
 let stoppingAll = false;
 let stopInFlight: Promise<void> | null = null;
 let playbackGeneration = 0;
@@ -146,7 +147,7 @@ export function getCastSenderName() { return castSenderName; }
 export function getProgress() { return { position: progressPosition, duration: progressDuration }; }
 export function getLivePlaybackPosition() {
   const current = audioElement?.currentTime;
-  return playbackSource && Number.isFinite(current) ? Math.max(0, current!) : progressPosition;
+  return playbackSource && trackStreamReady && !audioElement?.ended && Number.isFinite(current) ? Math.max(0, current!) : progressPosition;
 }
 
 export function addTrackChangeListener(fn: (track: TrackInfo | null) => void) {
@@ -180,19 +181,44 @@ function notifyQueue(tracks: TrackInfo[], position: number) {
 }
 
 function notifyProgress(position: number, duration: number) { progressPosition = Math.max(0, position || 0); progressDuration = Math.max(0, duration || 0); progressListeners.forEach((fn) => fn(progressPosition, progressDuration)); }
+function sanitizeArtist(artist?: string): string {
+  if (!artist || typeof artist !== 'string') return '';
+  return artist.replace(/\s*[-–—]\s*Topic\b/gi, '').replace(/\s*\(Topic\)/gi, '').trim() || artist.trim();
+}
+
+export function setScreensaverInhibited(inhibited: boolean) {
+  void call(inhibited ? 'inhibit_screensaver' : 'uninhibit_screensaver').catch(() => {});
+}
+
 function notifyTrack(track: TrackInfo | null) {
+  if (track && track.artist) {
+    track = { ...track, artist: sanitizeArtist(track.artist) };
+  }
+  if (track && currentTrack && track.videoId === currentTrack.videoId && !track.albumArt && currentTrack.albumArt) {
+    track = { ...track, albumArt: currentTrack.albumArt };
+  }
+  const sameDisplay = !!(
+    track && currentTrack &&
+    track.videoId === currentTrack.videoId &&
+    track.title === currentTrack.title &&
+    track.artist === currentTrack.artist &&
+    track.albumArt === currentTrack.albumArt &&
+    (track.duration || 0) === (currentTrack.duration || 0)
+  );
   if (track?.videoId !== currentTrack?.videoId) {
     prefetchedForVideoId = null;
     deepPrefetchedForVideoId = null;
   }
   currentTrack = track;
   if (track) notifyPlaybackError('');
-  trackChangeListeners.forEach((fn) => fn(track));
+  if (!sameDisplay) {
+    trackChangeListeners.forEach((fn) => fn(track));
+  }
 }
 /** Metadata may only be cleared after the media element has been silenced. */
 function clearPlayback() {
   playbackGeneration++;
-  playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
+  playbackSource = null; castPlaybackId = null; pendingCastEnded = false; trackStreamReady = false;
   stopCastProgress();
   notifyPlaying(false);
   audioElement?.pause();
@@ -316,8 +342,10 @@ async function handleCastTrack(data: any) {
     queuePosition: data.queuePosition,
     queueLength: data.queueLength,
   };
+  trackStreamReady = false;
   audioElement.src = track.url || '';
-  if (Number.isFinite(data.position) && data.position > 0) audioElement.currentTime = data.position;
+  try { audioElement.currentTime = Number.isFinite(data.position) && data.position > 0 ? data.position : 0; } catch {}
+  trackStreamReady = true;
   notifyProgress(data.position || 0, track.duration || 0);
   notifyTrack(track);
 
@@ -351,6 +379,8 @@ function handleCastMessage(msg: any) {
   switch (msg.event) {
     case 'error':
       if (usesCast() && typeof msg.data?.message === 'string') notifyPlaybackError(msg.data.message);
+      break;
+    case 'trackEnding':
       break;
     case 'volume':
       if (usesCast()) applyVolume(msg.data?.value, !!msg.data?.muted);
@@ -471,6 +501,7 @@ function scheduleCastReconnect() {
 
 function onAudioEnded() {
   if (stoppingAll || !currentTrack || !audioElement?.ended) return;
+  trackStreamReady = false;
   stopCastProgress();
   notifyPlaying(false);
   if (playbackSource === 'cast') {
@@ -551,8 +582,11 @@ async function loadAndPlay(track: TrackInfo, retry = false, manual = false) {
   pendingCastEnded = false;
   stopCastProgress();
   const resumePosition = retry ? audioElement.currentTime : 0;
+  trackStreamReady = false;
   audioElement.src = track.url;
-  if (resumePosition > 0) audioElement.currentTime = resumePosition;
+  try { audioElement.currentTime = resumePosition > 0 ? resumePosition : 0; } catch {}
+  trackStreamReady = true;
+  if (!retry) notifyProgress(0, track.duration || 0);
   notifyTrack(track);
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -617,7 +651,7 @@ export function destroyAudio() {
   currentTrack = null; isPlaying = false; castConnected = false; castSenderName = null; progressPosition = 0; progressDuration = 0;
   senderNotified = false;
   if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
-  playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
+  playbackSource = null; castPlaybackId = null; pendingCastEnded = false; trackStreamReady = false;
   localManualPlayback=false;
   prefetchedForVideoId=null;
   deepPrefetchedForVideoId=null;
@@ -668,22 +702,26 @@ export function togglePlayback() {
 }
 export async function playNext() {
   if (usesCast()) {
+    trackStreamReady = false;
     audioElement?.pause();
     await castPost('/api/next');
     return;
   }
   const previousTrack = currentTrack;
   const generation = ++playbackGeneration;
+  trackStreamReady = false;
   audioElement?.pause();
   notifyPlaying(false);
   notifyProgress(0, 0);
+  let settled = false;
   void call<[number], TrackInfo & { stopped?: boolean }>('peek_queue_track', 1).then(preview => {
-    if (generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
+    if (!settled && generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
       notifyTrack({ ...preview, url: '' });
       notifyProgress(0, preview.duration || 0);
     }
   }).catch(() => {});
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('next_track');
+  settled = true;
   if (generation !== playbackGeneration) return;
   if (result.stopped) { clearPlayback(); return; }
   if (result.error) {
@@ -695,22 +733,26 @@ export async function playNext() {
 }
 export async function playPrevious() {
   if (usesCast()) {
+    trackStreamReady = false;
     audioElement?.pause();
     await castPost('/api/prev');
     return;
   }
   const previousTrack = currentTrack;
   const generation = ++playbackGeneration;
+  trackStreamReady = false;
   audioElement?.pause();
   notifyPlaying(false);
   notifyProgress(0, 0);
+  let settled = false;
   void call<[number], TrackInfo & { stopped?: boolean }>('peek_queue_track', -1).then(preview => {
-    if (generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
+    if (!settled && generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
       notifyTrack({ ...preview, url: '' });
       notifyProgress(0, preview.duration || 0);
     }
   }).catch(() => {});
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('previous_track');
+  settled = true;
   if (generation !== playbackGeneration) return;
   if (result.stopped) return;
   if (result.error) {
@@ -731,7 +773,7 @@ export function stopAllPlayback(): Promise<void> {
   if (stopInFlight) return stopInFlight;
   stoppingAll = true;
   playbackGeneration++;
-  playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
+  playbackSource = null; castPlaybackId = null; pendingCastEnded = false; trackStreamReady = false;
   // Silence immediately; remove src instead of loading an empty URL.
   notifyPlaying(false);
   audioElement?.pause();

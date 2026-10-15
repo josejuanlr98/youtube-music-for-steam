@@ -4,7 +4,7 @@ from pathlib import Path
 import zipfile
 
 
-SOURCE_DIRS = ("src", "backend/src", "backend/tests", "backend/xml", "tests", "scripts")
+SOURCE_DIRS = ("src", "backend/src", "backend/tests", "backend/xml", "tests", "scripts", "screenshots")
 SOURCE_FILES = (
     "main.py",
     "py_modules/ytm_firefox.py",
@@ -50,9 +50,16 @@ def package(source: Path, output: Path, version: str) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     root_name = f"youtube-music-for-steam-{version}-source"
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        # Decky recognizes a plugin.json directly beneath the archive root as
+        # an installer. Nest developer sources to prevent accidental loading
+        # of a second uncompiled plugin alongside the actual runtime.
+        archive.writestr(f"{root_name}/SOURCE-ONLY.txt",
+                         "Developer source archive. Do not install this ZIP in Decky.\n"
+                         f"Install youtube-music-for-steam-{version}.zip instead.\n"
+                         "The editable project is in project/.\n")
         for path in wanted_files(source, version):
             relative = path.relative_to(source).as_posix()
-            archive.write(path, f"{root_name}/{relative}")
+            archive.write(path, f"{root_name}/project/{relative}")
 
 
 def main() -> None:

@@ -8,9 +8,11 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 
 ## Screenshots
 
-| Player | Casting from your phone |
+| Player — casting from your phone | Fullscreen lyrics |
 | --- | --- |
-| ![Player](screenshots/player-069.jpg) | ![Casting](screenshots/player-casting-069.jpg) |
+| ![Player receiving a Cast session](screenshots/player-casting-076.jpg) | ![Fullscreen lyrics with progress and Cast details](screenshots/lyrics-fullscreen-076.jpg) |
+
+![Translated fullscreen lyrics in 0.7.6](screenshots/lyrics-translated-076.jpg)
 
 | Library | Queue |
 | --- | --- |
@@ -24,13 +26,9 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 | --- | --- |
 | ![Playlist detail](screenshots/playlist-detail-069.jpg) | ![Lyrics tab](screenshots/player-lyrics-069.jpg) |
 
-| Fullscreen lyrics | Translated lyrics |
+| Language settings | Cookie import |
 | --- | --- |
-| ![Fullscreen lyrics](screenshots/lyrics-fullscreen-070.jpg) | ![Translated lyrics](screenshots/lyrics-translated-070.jpg) |
-
-| Cast lyrics fullscreen | Language settings | Cookie import |
-| --- | --- | --- |
-| ![Cast lyrics fullscreen](screenshots/lyrics-cast-fullscreen-069.jpg) | ![Language settings](screenshots/language-settings-070.jpg) | ![Cookie import](screenshots/cookie-import-069.jpg) |
+| ![Language settings](screenshots/language-settings-070.jpg) | ![Cookie import](screenshots/cookie-import-069.jpg) |
 
 ## What it can do
 
@@ -49,6 +47,20 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 Download the latest installable ZIP from [Releases](https://github.com/josejuanlr98/youtube-music-for-steam/releases/latest). In Gaming Mode, open **Decky → Developer Options → Install from ZIP**, select the file, then restart Decky if needed. The `-source` ZIP is for developers and is not the normal installer.
 
 Cast works without signing into the plugin. To use account features such as Library, Search, likes, and lyrics, open **Settings → Account** and import a YouTube Music session from a supported Firefox-family browser. The browser must be installed on the SteamOS device, opened in Desktop Mode, and signed into YouTube Music first.
+
+## New in 0.7.6: refined Player and lyrics, Google translation
+
+The Player has a more compact layout, a Cast device badge and refreshed artwork colors. Fullscreen lyrics add a progress bar and time display, larger cover art, a Music wordmark and a darker animated background. Manual lyric browsing resumes after three seconds; untimed lyrics still wait five seconds at the end before looping. Collection navigation starts loading earlier and returns to Quick Access sooner.
+
+The optional translator now tries **Google Translate's no-key GTX endpoint** first, with MyMemory and Apertium retained as fallbacks. Translation remains off by default. This is a best-effort endpoint rather than a configured Google Cloud API subscription: availability, quotas and translation quality can vary. Successful lines persist locally, repeated verses are reused, and rejected Google requests briefly pause further Google calls while fallback providers remain available. Partial failures retain readable originals and expose a retry control.
+
+The release review also restored the neutral idle Player hint, prevented a delayed Cast startup reset from interrupting an active phone session, and corrected translation cache persistence. The installer and compiled sources are verified together. Read the [0.7.6 release notes](https://github.com/josejuanlr98/youtube-music-for-steam/releases/tag/v0.7.6) for validation and limitations.
+
+### Install the runtime ZIP
+
+Install **youtube-music-for-steam-0.7.6.zip** through Decky Developer Options. The **-source.zip is for development**: its editable files are nested in `project/`, with a source-only notice at the archive root so Decky cannot recognize it as a second uncompiled plugin. Do not install GitHub's automatic source archives either.
+
+If an older source ZIP was installed in the past, a second folder with the same plugin name can override the working installation during startup and cause **Failed to fetch dynamically imported module**. Remove that source-only installation from Decky's plugins directory. The actual runtime directory must contain `dist/index.js` and `backend/out/server.cjs`.
 
 ## New in 0.7.5: meticulously optimized track transitions
 
@@ -80,11 +92,11 @@ If playback requires a fresh session, sign into YouTube Music in your supported 
 
 ## Fullscreen lyrics
 
-Open Lyrics and press **X** for fullscreen; press **B** to return. When timed lyrics are available, the current line follows playback and seeking. Otherwise, fullscreen uses a gentle reading scroll. For untimed lyrics, manual scrolling pauses reading for five seconds, then continues from your position. At the end, it waits five seconds and repeats. Timed lyrics return to the current sung line five seconds after manual input. Artist and Cast details share the light cover color used by translations. The view asks Steam for temporary wake protection and releases it on exit; availability depends on Steam/CEF.
+Open Lyrics and press **X** for fullscreen; press **B** to return. When timed lyrics are available, the current line follows playback and seeking. Otherwise, fullscreen uses a gentle reading scroll. For untimed lyrics, manual scrolling pauses reading for three seconds, then continues from your position. At the end, it waits five seconds and repeats. Timed lyrics return to the current sung line three seconds after manual input. Artist and Cast details share the light cover color used by translations. The view asks Steam for temporary wake protection and releases it on exit; availability depends on Steam/CEF.
 
 Lyrics are loaded on demand and cached for a small number of recent tracks. LRCLIB may provide a timing fallback when its song and artist match. Lyrics availability and timing depend on the providers and version of the recording.
 
-Lyric translation is off by default. Enable it in **Settings → Language** and select a target language. Lyric text, without cookies or account data, is sent to MyMemory on demand, with Apertium as a free fallback for the language pairs it supports. No API key is required. Provider quotas and availability are external to this plugin; when it is exhausted or unavailable, the original lyrics remain visible and the reader explains the problem. Successful lines are cached locally across restarts, repeated verses reuse the same translation, and partial results survive failures. Use Retry translation to request only missing lines. The original and translated lines share one highlight animation.
+Lyric translation is off by default. Enable it in **Settings → Language** and select a target language. Lyric text, without imported cookies or account data, is sent to Google Translate's no-key endpoint on demand, then to MyMemory and Apertium as needed for missing lines. No API key is required. Provider quotas and availability are external to this plugin; when a service is limited or unavailable, the original lyrics remain visible and failures expose a retry control. Successful lines are cached locally across restarts, repeated verses reuse the same translation, and partial results survive failures. Use Retry translation to request only missing lines. The original and translated lines share one highlight animation.
 
 ## Privacy and account sessions
 
@@ -108,7 +120,7 @@ pnpm run test:python
 
 Run `pnpm run package` to create the Decky install ZIP. The package includes the compiled frontend and backend, Python dependencies, and Linux runtime binaries.
 
-The build verifies official Node and yt-dlp download checksums and executes the actual yt-dlp Node provider before packaging. CI runs the same compatibility check on Linux. The downloadable `SHA256SUMS-0.7.5.txt` file lists the installer and source archive hashes.
+The build verifies official Node and yt-dlp download checksums and executes the actual yt-dlp Node provider before packaging. CI runs the same compatibility check on Linux. The downloadable `SHA256SUMS-0.7.6.txt` file lists the installer and source archive hashes.
 
 ## Project and attribution
 

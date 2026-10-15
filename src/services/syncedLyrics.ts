@@ -14,6 +14,7 @@ export function currentLyric(lines: TimedLine[], position: number) {
 // Offset the visual cue a fraction of a second to compensate for display
 // rendering and the interval between audio clock samples.
 const VISUAL_LEAD_SECONDS = 0.12;
+const MANUAL_PAUSE_MS = 3000;
 
 /** Follow actual audio positions, never an estimated wall-clock song timeline. */
 export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
@@ -61,9 +62,9 @@ export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
     pause() {
       const wasFollowing=!paused;
       paused = true;
-      resumeAt = Date.now()+5000;
+      resumeAt = Date.now()+MANUAL_PAUSE_MS;
       clearTimeout(resumeTimer);
-      resumeTimer = setTimeout(() => update(readPosition(), true), 5000);
+      resumeTimer = setTimeout(() => update(readPosition(), true), MANUAL_PAUSE_MS);
       return wasFollowing;
     },
     dispose() { disposed = true; clearTimeout(resumeTimer); view?.cancelAnimationFrame(frame); observer?.disconnect(); unsubscribe(); },

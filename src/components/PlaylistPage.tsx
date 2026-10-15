@@ -86,12 +86,13 @@ export const PlaylistPage = () => {
     leaving.current = true;
     requestBrowseReturn(playlist?.parentView);
     setBrowseDepth((playlist?.returnDepth ?? 1) - 1);
+    if (playlist?.origin !== 'route') requestLibraryReturn();
     Navigation.NavigateBack();
     if (playlist?.origin === 'route') return;
     setTimeout(() => {
-      Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
       requestLibraryReturn();
-    }, 180);
+      Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
+    }, 24);
   };
   const cancelBack = (event: { preventDefault:()=>void; stopPropagation:()=>void }) => { event.preventDefault(); event.stopPropagation(); back(); };
   useEffect(() => { setBrowseDepth(playlist?.returnDepth ?? 1); }, [playlist]);

@@ -9,7 +9,7 @@ export const defaultAccent = '78, 108, 132';
 export type ArtworkPalette = [string, string, string];
 export const defaultPalette: ArtworkPalette = [defaultAccent, '54, 74, 92', '34, 47, 61'];
 const cache = new Map<string, ArtworkPalette>();
-const PALETTE_STORAGE = 'ytm-artwork-palettes-v2';
+const PALETTE_STORAGE = 'ytm-artwork-palettes-v3';
 try {
   const saved = JSON.parse(localStorage.getItem(PALETTE_STORAGE) || '[]');
   if (Array.isArray(saved)) for (const [url, colors] of saved.slice(-64)) {
@@ -52,7 +52,7 @@ export function extractPalette(pixels: Uint8ClampedArray): ArtworkPalette {
   const ranked = [...bins.values()].map(bin => {
     const rgb = [bin.r, bin.g, bin.b].map(v => v / bin.count);
     const saturation = (Math.max(...rgb) - Math.min(...rgb)) / 255;
-    return { rgb, weight:bin.count * (1 + saturation * 2) };
+    return { rgb, weight:bin.count * (1 + saturation * 4.5) * (saturation < 0.16 ? 0.35 : 1) };
   }).sort((a, b) => b.weight - a.weight);
   if (!ranked.length) {
     if (!opaquePixels) return [...defaultPalette];
@@ -65,12 +65,19 @@ export function extractPalette(pixels: Uint8ClampedArray): ArtworkPalette {
   const chosen: number[][] = [];
   for (const { rgb } of ranked) {
     // Prefer genuinely different cover colors over three neighboring bins.
-    if (chosen.every(other => Math.hypot(...rgb.map((v, i) => v - other[i])) > 70)) chosen.push(rgb);
+    if (chosen.every(other => Math.hypot(...rgb.map((v, i) => v - other[i])) > 65)) chosen.push(rgb);
     if (chosen.length === 3) break;
   }
+  if (opaquePixels >= 64 && chosen.length >= 2) {
+    const c0 = chosen[0], c1 = chosen[1];
+    chosen[1] = [c0[0] * 0.72 + c1[0] * 0.28, c0[1] * 0.72 + c1[1] * 0.28, c0[2] * 0.72 + c1[2] * 0.28];
+    if (chosen.length > 2) chosen[2] = c1;
+  }
   const readable = (rgb: number[]) => {
-    const boost = Math.max(1, 185 / Math.max(1, ...rgb));
-    return rgb.map(v => Math.round(Math.min(255, v * boost) * .84 + 255 * .16)).join(', ');
+    const boost = Math.max(1, 200 / Math.max(1, ...rgb));
+    const boosted = rgb.map(v => Math.min(255, v * boost));
+    const high = Math.max(...boosted);
+    return boosted.map(v => Math.round(Math.min(255, Math.max(0, high - (high - v) * 1.08)) * .92 + 255 * .08)).join(', ');
   };
   const colors = chosen.map(readable);
   // Monochrome covers use shades of their own color, never unrelated hues.
@@ -94,7 +101,13 @@ function sampleArtwork(source: string, doc: Document) {
         canvas.width = canvas.height = 32;
         const context = canvas.getContext('2d', { willReadFrequently: true });
         if (!context) throw new Error('Canvas unavailable');
-        context.drawImage(image, 0, 0, 32, 32);
+        const nw = Number((image as any).naturalWidth) || 0, nh = Number((image as any).naturalHeight) || 0;
+        if (nw > 0 && nh > 0) {
+          const side = Math.min(nw, nh) * (nw > nh * 1.15 ? 0.74 : 1);
+          context.drawImage(image, (nw - side) / 2, (nh - side) / 2, side, side, 0, 0, 32, 32);
+        } else {
+          context.drawImage(image, 0, 0, 32, 32);
+        }
         resolve(extractPalette(context.getImageData(0, 0, 32, 32).data));
       } catch (error) { reject(error); }
     };
@@ -115,6 +128,33 @@ export function paletteArtworkUrl(original: string) {
     }
   } catch { /* Unrecognized artwork uses its original URL. */ }
   return original;
+}
+
+export function fullscreenArtworkUrl(original: string) {
+  try {
+    const url = new URL(original);
+    if (url.hostname.endsWith('.googleusercontent.com') || url.hostname.endsWith('.ggpht.com'))
+      return original.replace(/=w\d+-h\d+/, '=w800-h800').replace(/=s\d+([^a-z]|$)/, '=w800-h800$1');
+  } catch { /* Unrecognized artwork uses its original URL. */ }
+  return original;
+}
+
+const preloadedImages = new Set<string>();
+
+export function preloadArtworkImage(original: string, doc?: Document) {
+  if (!original || !/^https?:\/\//.test(original)) return;
+  const ImageCtor = (doc as any)?.defaultView?.Image || (typeof Image === 'function' ? Image : null);
+  if (typeof ImageCtor !== 'function') return;
+  for (const target of new Set([original, fullscreenArtworkUrl(original)])) {
+    if (preloadedImages.has(target)) continue;
+    if (preloadedImages.size >= 48) preloadedImages.delete(preloadedImages.values().next().value!);
+    preloadedImages.add(target);
+    try {
+      const img = new ImageCtor();
+      img.decoding = 'async';
+      img.src = target;
+    } catch { /* Ignore image preloading errors in restricted views. */ }
+  }
 }
 
 export async function artworkPalette(original: string, doc: Document) {
@@ -196,6 +236,7 @@ function runBoundedSample<T>(task: () => Promise<T>): Promise<T> {
 }
 
 export function preloadArtworkPalette(original: string, doc: Document): Promise<ArtworkPalette> {
+  preloadArtworkImage(original, doc);
   const cached = cache.get(original);
   if (cached) return Promise.resolve(cached);
   let pending = pendingPalettes.get(original);
@@ -218,6 +259,7 @@ export function useArtworkPalette(url?: string, view?: { current: HTMLElement | 
     // colors are immediate; uncached covers use the neutral placeholder until
     // their own sample is ready.
     setValue({ url, palette:url ? cache.get(url) || defaultPalette : defaultPalette });
+    if (url) preloadArtworkImage(url, view?.current?.ownerDocument || (typeof document !== 'undefined' ? document : undefined));
     if (!url || cache.has(url)) return;
     let alive = true;
     const pending = preloadArtworkPalette(url, view?.current?.ownerDocument || document);

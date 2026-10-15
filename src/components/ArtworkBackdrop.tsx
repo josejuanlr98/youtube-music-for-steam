@@ -80,15 +80,15 @@ export function ArtworkBackdrop({ palette, animated = false }: { palette: Artwor
     return () => { stopFirst(); stopSecond(); };
   }, [animated]);
   const [primary, secondary, tertiary] = palette;
-  const dark = (color: string) => channels(color).map(value => Math.round(value * .27 + 9)).join(', ');
+  const dark = (color: string) => channels(color).map(value => Math.round(value * .16 + 6)).join(', ');
   const surface = { position:'absolute', inset:'-18%', pointerEvents:'none', willChange:'transform' } as const;
   return <div className="ytm-atmosphere" aria-hidden="true" style={{ position:'absolute', inset:0, overflow:'hidden', zIndex:0, pointerEvents:'none',
-    background:`radial-gradient(ellipse 85% 90% at 18% 50%, rgba(${primary},.32), transparent 78%), linear-gradient(125deg, rgb(${dark(primary)}), rgb(${dark(tertiary)}))` }}>
+    background:`radial-gradient(ellipse 85% 90% at 18% 50%, rgba(${primary},.28), transparent 76%), linear-gradient(125deg, rgb(${dark(primary)}), rgb(${dark(tertiary)}))` }}>
     <div ref={firstRef} className="ytm-atmosphere-art" style={{ ...surface,
-      backgroundImage:`radial-gradient(ellipse 33% 43% at 29% 52%, rgba(${primary},.78) 0%, rgba(${primary},.38) 40%, transparent 79%), radial-gradient(ellipse 29% 35% at 68% 26%, rgba(${secondary},.6) 0%, rgba(${secondary},.28) 45%, transparent 78%)` }} />
+      backgroundImage:`radial-gradient(ellipse 35% 45% at 26% 52%, rgba(${primary},.68) 0%, rgba(${primary},.30) 42%, transparent 78%), radial-gradient(ellipse 30% 36% at 68% 26%, rgba(${secondary},.52) 0%, rgba(${secondary},.22) 45%, transparent 78%)` }} />
     <div ref={secondRef} className="ytm-atmosphere-flow" style={{ ...surface,
-      backgroundImage:`radial-gradient(ellipse 31% 39% at 71% 68%, rgba(${tertiary},.7) 0%, rgba(${tertiary},.33) 43%, transparent 80%), radial-gradient(ellipse 27% 32% at 42% 80%, rgba(${secondary},.5) 0%, rgba(${secondary},.22) 47%, transparent 79%)` }} />
+      backgroundImage:`radial-gradient(ellipse 32% 40% at 72% 68%, rgba(${tertiary},.62) 0%, rgba(${tertiary},.26) 44%, transparent 80%), radial-gradient(ellipse 28% 33% at 42% 80%, rgba(${secondary},.44) 0%, rgba(${secondary},.18) 47%, transparent 79%)` }} />
     <div className="ytm-atmosphere-shade" style={{ position:'absolute', inset:0,
-      background:'linear-gradient(90deg,rgba(5,8,14,.10),rgba(5,8,14,.30) 58%,rgba(5,8,14,.38)),radial-gradient(ellipse at 50% 50%,transparent 46%,rgba(5,8,14,.22))' }} />
+      background:'linear-gradient(90deg,rgba(5,8,14,.18),rgba(5,8,14,.30) 54%,rgba(5,8,14,.50)),radial-gradient(ellipse at 50% 50%,transparent 40%,rgba(5,8,14,.38))' }} />
   </div>;
 }

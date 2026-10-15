@@ -55,11 +55,12 @@ function CatalogDetail({selection,selectionKey:key}:{selection:ReturnType<typeof
     if(leaving.current)return;leaving.current=true;
     requestBrowseReturn(selection?.parentView);
     setBrowseDepth((selection?.returnDepth ?? 1) - 1);
+    if(selection?.origin==='library')requestLibraryTabReturn();
     Navigation.NavigateBack();
     if(selection?.origin==='library')setTimeout(()=>{
       requestLibraryTabReturn();
       Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
-    },180);
+    },24);
   };
   const cancel=(event:{preventDefault:()=>void;stopPropagation:()=>void})=>{event.preventDefault();event.stopPropagation();back();};
   useEffect(() => { setBrowseDepth(selection?.returnDepth ?? 1); }, [selection]);

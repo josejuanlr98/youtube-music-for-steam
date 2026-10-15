@@ -63,13 +63,13 @@ for(const [locale,labels] of Object.entries(catalogText)){
   target['lyrics.translating']=labels[19];target['lyrics.retryTranslation']=labels[20];
 }
 const catalogExtras:Record<string,string[]>={
-  en:['Related artists','Loading more of your library…','Off by default. Lyrics are sent to MyMemory, with Apertium as a fallback for supported languages. Cookies are never sent. Free services have availability and accuracy limits.'],
-  es:['Artistas similares','Cargando más de tu biblioteca…','Desactivado por defecto. Las letras se envían a MyMemory, con Apertium como respaldo para idiomas compatibles. Nunca se envían tus cookies. Los servicios gratuitos tienen límites de disponibilidad y precisión.'],
-  fr:['Artistes similaires','Chargement de la bibliothèque…','Désactivé par défaut. Les paroles sont envoyées à MyMemory, avec Apertium en secours pour les langues prises en charge. Aucun cookie n’est envoyé. Les services gratuits ont des limites de disponibilité et de précision.'],
-  de:['Ähnliche Künstler','Weitere Bibliothekseinträge werden geladen…','Standardmäßig aus. Texte werden an MyMemory gesendet; Apertium unterstützt als Ersatz einige Sprachen. Cookies werden nie gesendet. Kostenlose Dienste sind nicht immer verfügbar oder genau.'],
-  pt:['Artistas relacionados','Carregando mais da biblioteca…','Desativado por padrão. As letras são enviadas ao MyMemory, com Apertium como alternativa para idiomas compatíveis. Cookies nunca são enviados. Serviços gratuitos têm limites de disponibilidade e precisão.'],
-  it:['Artisti simili','Caricamento della libreria…','Disattivato per impostazione predefinita. I testi vengono inviati a MyMemory, con Apertium come alternativa per le lingue supportate. I cookie non vengono mai inviati. I servizi gratuiti hanno limiti di disponibilità e precisione.'],
-  ja:['関連アーティスト','ライブラリを追加読み込み中…','初期設定はオフです。歌詞をMyMemoryに送信し、対応言語ではApertiumを代替として使用します。Cookieは送信しません。無料サービスの可用性と精度には制限があります。'],
+  en:['Related artists','Loading more of your library…','Off by default. Lyrics are sent to Google Translate through a no-key endpoint, with MyMemory and Apertium as fallbacks. Cookies are never sent. Availability and accuracy are not guaranteed.'],
+  es:['Artistas similares','Cargando más de tu biblioteca…','Desactivado por defecto. Las letras se envían a Google Translate mediante un servicio sin clave, con MyMemory y Apertium como alternativas. Nunca se envían tus cookies. La disponibilidad y precisión pueden variar.'],
+  fr:['Artistes similaires','Chargement de la bibliothèque…','Désactivé par défaut. Les paroles sont envoyées à Google Translate sans clé, avec MyMemory et Apertium en secours. Aucun cookie n’est envoyé. Disponibilité et précision non garanties.'],
+  de:['Ähnliche Künstler','Weitere Bibliothekseinträge werden geladen…','Standardmäßig aus. Texte werden ohne Schlüssel an Google Translate gesendet; MyMemory und Apertium dienen als Ersatz. Cookies werden nie gesendet. Verfügbarkeit und Genauigkeit können variieren.'],
+  pt:['Artistas relacionados','Carregando mais da biblioteca…','Desativado por padrão. As letras são enviadas ao Google Translate sem chave, com MyMemory e Apertium como alternativas. Cookies nunca são enviados. Disponibilidade e precisão podem variar.'],
+  it:['Artisti simili','Caricamento della libreria…','Disattivato per impostazione predefinita. I testi vengono inviati a Google Translate senza chiave, con MyMemory e Apertium come alternative. I cookie non vengono mai inviati. Disponibilità e precisione possono variare.'],
+  ja:['関連アーティスト','ライブラリを追加読み込み中…','初期設定はオフです。歌詞をキー不要のGoogle Translateに送信し、MyMemoryとApertiumを代替として使用します。Cookieは送信しません。可用性と精度は保証されません。'],
 };
 for(const [locale,labels] of Object.entries(catalogExtras)){
   const target=locale==='en'?en:dictionaries[locale as keyof typeof dictionaries];

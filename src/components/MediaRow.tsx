@@ -1,6 +1,6 @@
 import { DialogButton, Focusable } from '@decky/ui';
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
-import { useArtworkAccent, defaultAccent, defaultPalette, preloadArtworkPalette } from '../services/artworkPalette';
+import { useArtworkAccent, defaultAccent, defaultPalette, preloadArtworkPalette, artworkPaletteReady } from '../services/artworkPalette';
 import { FaMusic } from 'react-icons/fa';
 import { focusLyricsReader } from '../services/focus';
 import { focusMediaRow, blurMediaRow } from '../services/mediaRowFocus';
@@ -19,10 +19,16 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
     const row = ref.current;
     return () => blurMediaRow(row);
   }, []);
-  const [sample, setSample] = useState(false);
-  const [paletteStatus, setPaletteStatus] = useState<{ image:string; status:'ready'|'fallback' } | null>(null);
+  const alreadyCached = Boolean(image && typeof artworkPaletteReady === 'function' && artworkPaletteReady(image));
+  const [sample, setSample] = useState(() => alreadyCached);
+  const [paletteStatus, setPaletteStatus] = useState<{ image:string; status:'ready'|'fallback' } | null>(() => alreadyCached && image ? { image, status:'ready' } : null);
   useEffect(() => {
     if (!tintFocus || !image || !ref.current) return;
+    if (typeof artworkPaletteReady === 'function' && artworkPaletteReady(image)) {
+      setSample(true);
+      setPaletteStatus({ image, status:'ready' });
+      return;
+    }
     const Observer = ref.current.ownerDocument.defaultView?.IntersectionObserver;
     if (!Observer) { setSample(true); return; }
     const observer = new Observer(entries => {
@@ -33,10 +39,11 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
   }, [image, tintFocus]);
   useEffect(() => {
     if (!tintFocus || !image || !sample) return;
+    if (paletteStatus?.image === image) return;
     let active = true, settled = false;
     const timer = setTimeout(() => {
       if (active && !settled) { settled = true; setPaletteStatus({ image, status:'fallback' }); }
-    }, 700);
+    }, 350);
     void preloadArtworkPalette(image, ref.current?.ownerDocument || document).then(color => {
       if (!active || settled) return;
       settled = true; clearTimeout(timer);
@@ -47,15 +54,14 @@ export function MediaRow({ title, subtitle, image, icon, actions, selected, disa
     });
     return () => { active = false; clearTimeout(timer); };
   }, [image, sample, tintFocus]);
-  const paletteResolved = !tintFocus || !image || paletteStatus?.image === image;
-  useEffect(() => focusRequest && !disabled && paletteResolved ? focusLyricsReader(mainRef.current) : undefined, [focusRequest, disabled, paletteResolved]);
-  const useTint = !tintFocus || !image || paletteStatus?.image === image && paletteStatus.status === 'ready';
-  const accent = useArtworkAccent(useTint && tintFocus && sample ? image || undefined : undefined, ref);
+  useEffect(() => focusRequest && !disabled ? focusLyricsReader(mainRef.current) : undefined, [focusRequest, disabled]);
+  const useTint = !tintFocus || !image || alreadyCached || (paletteStatus?.image === image && paletteStatus.status === 'ready');
+  const accent = useArtworkAccent(useTint && tintFocus && (sample || alreadyCached) ? image || undefined : undefined, ref);
   return <Focusable ref={ref} noFocusRing
     onGamepadFocus={() => focusMediaRow(ref.current)} onGamepadBlur={() => blurMediaRow(ref.current)}
     onFocusCapture={() => { focusMediaRow(ref.current); if (tintFocus) setSample(true); }}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) blurMediaRow(ref.current); }}
-    style={{ '--ytm-row-accent':accent !== defaultAccent ? accent : '125,145,165', visibility:paletteResolved ? undefined : 'hidden' } as CSSProperties}
+    style={{ '--ytm-row-accent':accent !== defaultAccent ? accent : '125,145,165' } as CSSProperties}
     className={`ytm-media-row${selected ? ' ytm-media-current' : ''}${tintFocus ? ' ytm-library-tint' : ''}`} flow-children="horizontal">
     {editing ? <div className="ytm-media-copy"><div className="ytm-media-title">{title}</div><div className="ytm-media-subtitle">{subtitle}</div></div> :
     <DialogButton ref={mainRef} data-ytm-focus-id={focusId} className="ytm-button ytm-media-main" style={{ minWidth:0, width:0, flex:'1 1 0', padding:0, margin:0, display:'flex', alignItems:'center', gap:8, height:58, minHeight:58, border:0 }} disabled={disabled} onClick={onPlay} onOKActionDescription={playDescription}>

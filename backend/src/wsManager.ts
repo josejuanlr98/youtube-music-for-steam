@@ -4,6 +4,7 @@ import { allowedLocalOrigin } from './localOrigin.js';
 
 export type WsEventType =
   | 'track'
+  | 'trackEnding'
   | 'state'
   | 'queue'
   | 'stop'

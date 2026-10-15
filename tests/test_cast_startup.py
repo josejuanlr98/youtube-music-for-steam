@@ -55,6 +55,36 @@ class CastStartupTests(unittest.IsolatedAsyncioTestCase):
         log.assert_called_once_with('Restart failed')
         self.plugin.hard_reset.assert_awaited_once_with()
 
+    async def test_deferred_boot_reset_does_not_interrupt_an_active_phone(self):
+        import json
+        self.plugin.queue = []
+        self.plugin.is_playing = False
+        self.plugin.hard_reset = AsyncMock()
+        for state in ({'connected': True}, {'isPlaying': True}, {'track': {'videoId': 'playing'}}):
+            response = Mock()
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            response.read.return_value = json.dumps(state).encode()
+            opener = Mock()
+            opener.open.return_value = response
+            with patch.object(module.asyncio, 'sleep', new=AsyncMock()), patch.object(module.urllib.request, 'build_opener', return_value=opener):
+                await self.plugin._deferred_boot_cast_reset()
+        self.plugin.hard_reset.assert_not_awaited()
+
+    async def test_deferred_boot_reset_only_restarts_an_idle_receiver(self):
+        self.plugin.queue = []
+        self.plugin.is_playing = False
+        self.plugin.hard_reset = AsyncMock()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"connected": false, "isPlaying": false, "track": null}'
+        opener = Mock()
+        opener.open.return_value = response
+        with patch.object(module.asyncio, 'sleep', new=AsyncMock()), patch.object(module.urllib.request, 'build_opener', return_value=opener):
+            await self.plugin._deferred_boot_cast_reset()
+        self.plugin.hard_reset.assert_awaited_once_with()
+
 
 if __name__ == '__main__':
     unittest.main()

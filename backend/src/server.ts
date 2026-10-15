@@ -250,6 +250,7 @@ async function main() {
           // the just-ended Cast session when advertising comes back.
           await dataStore.remove('mdxContext.cl');
           await dataStore.remove('mdxContext.m');
+          await dataStore.remove('app.pid');
           await dataStore.flush();
           castPlayer.clearOnDisconnect();
           wsManager.broadcast('connection', { phoneConnected: false, senderName: null });
@@ -263,6 +264,7 @@ async function main() {
         // any network poll behind that restart.
         reconcileInflight = operation.then(() => reconcile()).catch(err => {
           console.warn('[YTCast] Receiver restart deferred to network poll:', err);
+          setTimeout(() => { if (!shuttingDown && !advertising) void safeReconcile(); }, 600);
         });
         try {
           await operation;

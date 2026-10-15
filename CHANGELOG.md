@@ -1,5 +1,15 @@
 # Historial de cambios
 
+## 0.7.6
+
+- Refresh the Player layout, Cast badge, Music wordmark, artwork sampling and fullscreen background. Add fullscreen progress/time and larger cover art; publish three new Steam Deck screenshots.
+- Use Google Translate's no-key endpoint before MyMemory/Apertium fallbacks. Preserve line alignment, persist Google-only successes, close responses, back off on 429/503 and share the translation time budget across providers.
+- Keep translation failures visible with Retry, and update the provider descriptions in all seven interface languages. Restore the neutral idle Player helper text.
+- Expand lyric lookup with cleaned title/artist metadata and LRCLIB search, requiring a matching artist and recording duration before using its synchronized lines. Retry transient lyric failures and return to lyric following after three seconds of manual browsing.
+- Warm playlist previews and artwork earlier, retain more bounded collection cache entries and return to Quick Access sooner. Preserve progress through media transitions and normalize artist Topic suffixes.
+- Persist the staged Node runtime and guard delayed Cast startup recovery so a connected or playing phone is not interrupted.
+- Nest developer source files beneath project/ so the source-only ZIP cannot be installed by Decky as an uncompiled duplicate. Rebuild and verify runtime/source consistency, Linux executables, archive integrity and hashes before release.
+
 ## 0.7.5
 
 - Meticulous optimization across Python, Node.js and the Steam/CEF interface, developed with assistance from Gemini 4 Argon.

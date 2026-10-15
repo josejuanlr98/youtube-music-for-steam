@@ -29,7 +29,7 @@ function returnBrowse(pageDepth: number, requestReturn: () => void) {
       returning = false;
       Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
       requestReturn();
-    }, 180);
+    }, 24);
   };
   back();
 }

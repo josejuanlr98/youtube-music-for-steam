@@ -42,7 +42,7 @@ export function startLyricsScroll(element: HTMLElement, initialPauseMs = 2000) {
       // Continue from the settled manual position. Returning to a saved anchor
       // would fight controller/wheel motion; only timed lyrics follow a cue.
       position=Math.max(0,Math.min(end,element.scrollTop));
-      // Manual browsing to the end has already waited the five-second delay.
+      // Manual browsing to the end has already waited the three-second delay.
       if(position>=end)restartAt=now;
     }
     if(restartAt){
@@ -62,7 +62,7 @@ export function startLyricsScroll(element: HTMLElement, initialPauseMs = 2000) {
     pause(){
       const wasFollowing=!manualPause;
       manualPause=true;
-      restartAt=0;pausedUntil=Date.now()+5000;schedule();
+      restartAt=0;pausedUntil=Date.now()+3000;schedule();
       return wasFollowing;
     },
     setPlaying(value:boolean){playing=value;previous=Date.now();position=element.scrollTop;schedule();},

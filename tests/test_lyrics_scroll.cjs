@@ -24,8 +24,8 @@ motion.setPlaying(false);const paused=el.scrollTop,frameCount=framesRun;advance(
 assert.equal(el.scrollTop,paused);assert.equal(framesRun,frameCount,'playback pause schedules no recurring RAF');assert.equal(timers.size,0);
 motion.setPlaying(true);advance(100);assert(el.scrollTop>paused);
 motion.pause();el.scrollTop=50;assert.equal(frames.size,0);assert.equal(timers.size,1);
-advance(4000);assert.equal(el.scrollTop,50);assert.equal(motion.pause(),false,'repeated input renews the pause');el.scrollTop=35;
-advance(4999);assert.equal(el.scrollTop,35);advance(1);assert.equal(el.scrollTop,35,'untimed reading resumes from the manual position without restoring an old anchor');advance(16);assert(el.scrollTop>35&&el.scrollTop<36);advance(600);assert(el.scrollTop>35);
+advance(2000);assert.equal(el.scrollTop,50);assert.equal(motion.pause(),false,'repeated input renews the pause');el.scrollTop=35;
+advance(2999);assert.equal(el.scrollTop,35);advance(1);assert.equal(el.scrollTop,35,'untimed reading resumes from the manual position without restoring an old anchor');advance(16);assert(el.scrollTop>35&&el.scrollTop<36);advance(600);assert(el.scrollTop>35);
 while(el.scrollTop<100)advance(16);
 assert.equal(frames.size,0,'end-of-reader wait has no RAF');const restart=[...timers.values()][0].at;advance(restart-now-1);assert.equal(el.scrollTop,100);advance(1);assert.equal(el.scrollTop,0);advance(16);assert(el.scrollTop>0,'loop resumes immediately after the five-second end wait');
 doc.visibilityState='hidden';events.get('visibilitychange')();const before=el.scrollTop;

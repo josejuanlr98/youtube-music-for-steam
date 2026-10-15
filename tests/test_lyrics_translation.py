@@ -21,6 +21,9 @@ class TranslationTests(unittest.TestCase):
         self.fallback = patch('ytm_translation._apertium_translate', return_value={})
         self.fallback.start()
         self.addCleanup(self.fallback.stop)
+        self.google = patch('ytm_translation._google_nmt_translate', return_value={})
+        self.google.start()
+        self.addCleanup(self.google.stop)
 
     def test_free_fallback_recovers_daily_quota_and_preserves_line_alignment(self):
         self.fallback.stop()

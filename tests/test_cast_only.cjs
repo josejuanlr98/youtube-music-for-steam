@@ -84,7 +84,6 @@ const { PlayerView } = load('PlayerView.tsx');
   const emptyPlayer = flatten(PlayerView());
   const hint = emptyPlayer.find(n => n.props?.className?.includes('ytm-artist-name'));
   assert.equal(hint.props.children.props.text,'player.find');
-  assert.equal(hint.props.style.color,'#b8bcbf','the Library hint stays neutral even while the palette hook retains the last cover');
-  assert.notEqual(hint.props.style.color,detailColor);
+  assert.equal(hint.props.style.color,'#b8bcbf','the idle helper stays neutral with a cached cover palette');
   console.log('PASS Cast-only access, account isolation, playback controls and sign-in transition');
 })().catch(error => { console.error(error); process.exitCode = 1; });

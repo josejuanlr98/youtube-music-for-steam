@@ -17,6 +17,7 @@ _pending = {}
 _source_cache = OrderedDict()
 _loaded_path = None
 _quota_retry_at = 0
+_google_retry_at = 0
 _apertium_pairs = None
 _apertium_pairs_until = 0
 _apertium_pending = None
@@ -125,6 +126,99 @@ def _pairs(deadline):
     return pairs
 
 
+def _google_nmt_translate(lines, source, target, deadline):
+    """Best-effort no-key Google endpoint; keep line alignment and bound retries."""
+    if not lines or monotonic() >= deadline or monotonic() < _google_retry_at:
+        return {}
+    converted = {}
+    batches = [lines[i:i + 8] for i in range(0, len(lines), 8)]
+    try:
+        from requests.adapters import HTTPAdapter
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8)
+        session.mount('https://', adapter)
+    except Exception:
+        return {}
+    headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
+
+    def query_gtx(text):
+        global _google_retry_at
+        remaining = deadline - monotonic()
+        if remaining <= 0 or monotonic() < _google_retry_at:
+            return None
+        resp = session.get(
+            'https://translate.googleapis.com/translate_a/single',
+            params={'client': 'gtx', 'sl': source or 'auto', 'tl': target, 'dt': 't', 'q': text},
+            headers=headers,
+            timeout=min(4.0, remaining),
+        )
+        try:
+            if resp.status_code in (429, 503):
+                try:
+                    wait = float(resp.headers.get('Retry-After', '60'))
+                except (ValueError, TypeError):
+                    wait = 60
+                with _lock:
+                    _google_retry_at = monotonic() + max(60, min(3600, wait))
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if not isinstance(data, list) or not data or not isinstance(data[0], list):
+                return None
+            pieces = [seg[0] for seg in data[0] if isinstance(seg, list) and seg and isinstance(seg[0], str)]
+            out = unescape(''.join(pieces)).replace('\r\n', '\n').strip()
+            return out if out else None
+        finally:
+            resp.close()
+
+    def translate_batch(batch):
+        local_out = {}
+        if deadline - monotonic() <= 0:
+            return local_out
+        try:
+            # Double newline acts as a hard paragraph break in Google NMT so consecutive
+            # unpunctuated lyric lines are never merged into a single sentence.
+            joined = query_gtx('\n\n'.join(batch))
+            if joined:
+                parts = [p.strip().replace('\n', ' ') for p in re.split(r'\n\s*\n', joined) if p.strip()]
+                if len(parts) != len(batch):
+                    parts = [p.strip() for p in joined.split('\n') if p.strip()]
+                if len(parts) == len(batch) and all(parts):
+                    local_out.update(zip(batch, parts))
+                    return local_out
+        except Exception:
+            pass
+        return local_out
+
+    def translate_single(line):
+        if deadline - monotonic() <= 0:
+            return line, None
+        try:
+            res = query_gtx(line)
+            if res:
+                return line, res.replace('\n', ' ').strip()
+        except Exception:
+            pass
+        return line, None
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for batch_res in pool.map(translate_batch, batches):
+                converted.update(batch_res)
+        still_missing = [line for line in lines if line not in converted]
+        if still_missing and deadline - monotonic() > 0:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                for line, val in pool.map(translate_single, still_missing):
+                    if val:
+                        converted[line] = val
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+    return converted
+
+
 def _apertium_translate(lines, source, target, deadline):
     """Documented no-key fallback; use only pairs advertised by the server."""
     if not lines or source not in _ISO3 or target not in _ISO3:
@@ -195,8 +289,12 @@ def _translate(lyrics, target, cache_path):
         _load_cache(cache_path)
         converted = {line: _cache[_key(line, source, target)] for line in content if _key(line, source, target) in _cache}
     missing = [line for line in content if line not in converted]
+    needs_translation = bool(missing)
+    deadline = monotonic() + 12
     if missing:
-        deadline = monotonic() + 12
+        converted.update(_google_nmt_translate(missing, source, target, min(deadline, monotonic() + 6)))
+        missing = [line for line in content if line not in converted]
+    if missing:
         memory_deadline = deadline - 4
         chunks, current, size = [], [], 0
         for line in missing:
@@ -255,6 +353,7 @@ def _translate(lyrics, target, cache_path):
                 converted.update(result)
         remaining = [line for line in content if line not in converted]
         converted.update(_apertium_translate(remaining, source, target, deadline))
+    if needs_translation:
         with _lock:
             for original, translation in converted.items():
                 _cache[_key(original, source, target)] = translation

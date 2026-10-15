@@ -1,3 +1,8 @@
+export function cleanArtist(raw?: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  return raw.replace(/\s*[-–—]\s*Topic\b/gi, "").replace(/\s*\(Topic\)/gi, "").trim() || raw.trim();
+}
+
 import { spawn } from 'node:child_process';
 import { audioSession } from './audioSession.js';
 
@@ -102,7 +107,7 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
               resolve({
                 videoId: data.id ?? videoId,
                 title: data.title ?? 'Unknown',
-                artist: data.uploader ?? data.channel ?? 'Unknown',
+                artist: cleanArtist((data.artist || data.creator || data.uploader || data.channel || 'Unknown') as string),
                 albumArt: data.thumbnail ?? '',
                 duration: data.duration ?? 0,
                 url: data.url ?? '',
@@ -129,7 +134,7 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
         resolve({
           videoId: data.id ?? videoId,
           title: data.title ?? 'Unknown',
-          artist: data.uploader ?? data.channel ?? 'Unknown',
+          artist: cleanArtist((data.artist || data.creator || data.uploader || data.channel || 'Unknown') as string),
           albumArt: data.thumbnail ?? '',
           duration: data.duration ?? 0,
           url: data.url ?? '',

@@ -7,6 +7,15 @@ def artwork(item):
     return next((thumb.get('url', '') for thumb in reversed(thumbs) if isinstance(thumb, dict)), '')
 
 
+def clean_artist(name):
+    if not name or not isinstance(name, str):
+        return ""
+    import re
+    cleaned = re.sub(r'\s*[-–—]\s*Topic\b', '', name, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*\(Topic\)', '', cleaned, flags=re.IGNORECASE).strip()
+    return cleaned or name.strip()
+
+
 def entry(item, kind=None, defaults=None):
     if not isinstance(item, dict):
         return None
@@ -21,8 +30,8 @@ def entry(item, kind=None, defaults=None):
     if kind == 'playlist' and identifier.startswith('VL'):
         identifier = identifier[2:]
     artists = item.get('artists') or defaults.get('artists') or []
-    artist = ', '.join(str(a.get('name') or '') for a in artists if isinstance(a, dict))
-    artist = artist or str(item.get('artist') or defaults.get('artist') or '')
+    artist = ', '.join(clean_artist(str(a.get('name') or '')) for a in artists if isinstance(a, dict))
+    artist = clean_artist(artist or str(item.get('artist') or defaults.get('artist') or ''))
     title = item.get('title') or item.get('artist') or item.get('name') or 'Unknown'
     image = artwork(item) or defaults.get('image') or ''
     subtitle = artist or str(item.get('year') or '')

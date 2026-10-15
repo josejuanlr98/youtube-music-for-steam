@@ -15,7 +15,7 @@ import { CatalogLibrary } from './CatalogLibrary';
 import type { CatalogFilter } from '../services/catalog';
 import { cachedPlaylistLibrary, loadPlaylistLibrary, type PlaylistEntry } from '../services/playlistLibrary';
 import { useBrowseReturn } from '../services/browseState';
-import { clearPlaylistData } from '../services/playlistData';
+import { clearPlaylistData, loadPlaylistData } from '../services/playlistData';
 
 const LIKED_SONGS_ART = 'https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-1200.png';
 const orderKey = 'ytm-library-order-v1';
@@ -115,6 +115,7 @@ const AccountLibrary = ({ onSwitchToPlayer, onCategoryChange, categoryFocusReque
     if (!scroll) return;
     const snapshot = consumeLibraryReturn();
     if (!snapshot) return;
+    scroll.scrollTop = snapshot.libraryScrollTop;
     const view = scroll.ownerDocument.defaultView;
     const frame = view?.requestAnimationFrame(() => { scroll.scrollTop = snapshot.libraryScrollTop; });
     return () => { if (frame) view?.cancelAnimationFrame(frame); };
@@ -122,6 +123,7 @@ const AccountLibrary = ({ onSwitchToPlayer, onCategoryChange, categoryFocusReque
   const openPlaylist = (playlist: PlaylistEntry) => {
     const scroll = rootRef.current?.closest<HTMLElement>('[class*="TabContentsScroll"]');
     const parentView=browse.capture({},'entry:playlist:'+playlist.playlistId);
+    if (typeof loadPlaylistData === 'function') void loadPlaylistData(playlist.playlistId, true);
     selectPlaylist({ ...playlist, thumbnail:playlist.playlistId === 'LM' ? LIKED_SONGS_ART : playlist.thumbnail, libraryScrollTop:scroll?.scrollTop ?? 0,parentView });
     Navigation.CloseSideMenus();
     Navigation.Navigate(PLAYLIST_ROUTE);

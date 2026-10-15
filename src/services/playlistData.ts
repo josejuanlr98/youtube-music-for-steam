@@ -7,7 +7,7 @@ let epoch=0;
 export function clearPlaylistData(){epoch++;cache.clear();pending.clear();}
 export function cachedPlaylistData(id:string){
   const value=cache.get(id);
-  return value&&Date.now()-value.time<300000?value.data:undefined;
+  return value&&Date.now()-value.time<600000?value.data:undefined;
 }
 export async function loadPlaylistData(id:string,preview=false):Promise<PlaylistData>{
   const cached=cachedPlaylistData(id);
@@ -21,7 +21,7 @@ export async function loadPlaylistData(id:string,preview=false):Promise<Playlist
     const result={...data,complete:data.complete??!preview};
     // A slower preview must never replace a complete response.
     if(!preview||!cachedPlaylistData(id)?.complete){
-      if(cache.size>=8)cache.delete(cache.keys().next().value!);
+      if(cache.size>=16)cache.delete(cache.keys().next().value!);
       cache.set(id,{time:Date.now(),data:result});
     }
     return result;

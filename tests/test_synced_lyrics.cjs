@@ -15,8 +15,8 @@ function progress(value){position=value;listener(value)}
 progress(1.9);assert.equal(active.at(-1),0,'visual cue leads the audio clock slightly');
 progress(2);assert.equal(active.at(-1),0);
 const count=moves.length;progress(3);assert.equal(moves.length,count,'same line must not repeatedly restart smooth scrolling');
-follow.pause();assert.equal(delay,5000);progress(6);assert.equal(active.at(-1),1);assert.equal(moves.length,count);
-now+=4999;progress(6);assert.equal(moves.length,count);now++;timer();assert(moves.length>count,'manual reading resumes at current audio time');
+follow.pause();assert.equal(delay,3000);progress(6);assert.equal(active.at(-1),1);assert.equal(moves.length,count);
+now+=2999;progress(6);assert.equal(moves.length,count);now++;timer();assert(moves.length>count,'manual reading resumes at current audio time');
 progress(2);assert.equal(active.at(-1),0,'seek backwards follows the earlier line');
 progress(10);assert.equal(active.at(-1),-1,'outro has no falsely active lyric');
 follow.dispose();assert(unsubscribed);const disposed=moves.length;progress(2);assert.equal(moves.length,disposed);
@@ -40,7 +40,7 @@ const flush=()=>{while(frames.size){const batch=[...frames.values()];frames.clea
 lineTop=350;resize();flush();assert.equal(layoutMoves.at(-1).top,270,'same cue re-centers after translated rows resize');
 mounted.pause();reader.scrollTop=400;const manualCount=layoutMoves.length;
 lineTop=450;resize();flush();assert.equal(layoutMoves.length,manualCount,'translation arrival preserves manual-reading timeout');
-now+=5000;timer();assert.equal(layoutMoves.at(-1).top,370);assert.equal(layoutMoves.at(-1).behavior,'smooth');
+now+=3000;timer();assert.equal(layoutMoves.at(-1).top,370);assert.equal(layoutMoves.at(-1).behavior,'smooth');
 resize();mounted.dispose();assert(disconnected);assert.equal(frames.size,0);
 console.log('PASS fullscreen waits for real layout, re-centers resized translations and preserves manual reading');
 
@@ -48,8 +48,8 @@ console.log('PASS fullscreen waits for real layout, re-centers resized translati
 // restores following even when Steam has not delivered the timer callback.
 let pollingListener,nowMoved=0;
 const recovered=api.followSyncedLyrics(reader,lines,()=>position,fn=>{pollingListener=fn;return()=>{};},()=>{},()=>nowMoved++);
-recovered.pause();now+=4000;recovered.pause();const beforeRecovery=nowMoved;
-now+=4999;pollingListener(position);assert.equal(nowMoved,beforeRecovery);
+recovered.pause();now+=2000;recovered.pause();const beforeRecovery=nowMoved;
+now+=2999;pollingListener(position);assert.equal(nowMoved,beforeRecovery);
 now++;pollingListener(position);assert(nowMoved>beforeRecovery);
 recovered.dispose();
 console.log('PASS five-second idle deadline resets on input and recovers through live progress polling');
