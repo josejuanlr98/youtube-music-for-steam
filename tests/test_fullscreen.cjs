@@ -11,7 +11,7 @@ const modules = {
  '../services/lyricColor':color,
  '../services/fullscreenPower':{acquireFullscreenPower:()=>()=>{}},
  'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},
- 'react':{useState:v=>[typeof v==='function'?v():v,()=>{}],useRef:()=>({current:null}),useEffect:fn=>effects.push(fn)},
+ 'react':{useState:v=>[typeof v==='function'?v():v,()=>{}],useRef:()=>({current:null}),useLayoutEffect:fn=>effects.push(fn),useEffect:fn=>effects.push(fn)},
  '@decky/ui':{Focusable:'div',DialogButton:'button',Navigation:{NavigateBack(){backs++},OpenQuickAccessMenu(){reopened++}},GamepadButton:{BUMPER_LEFT:5,BUMPER_RIGHT:6,DIR_UP:9,DIR_DOWN:10},QuickAccessTab:{Decky:1}},
  'react-icons/fa':{}, 'react-icons/md':{}, 'react-icons/si':{}, '../services/lyricsScroll':{}, '../services/syncedLyrics':{}, '../services/notifications':{},
  '../services/i18n':{useI18n:()=>({t:key=>key})},

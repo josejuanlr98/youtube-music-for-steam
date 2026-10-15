@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 function load(name, modules, globals = {}) {
+  if(modules.react)modules.react.useLayoutEffect??=modules.react.useEffect;
   const exports = {};
   const source = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '..', name), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },

@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.7.7-beta.3
+
+- Reset fullscreen's backdrop immediately to its neutral palette on Nothing playing, remove the previous palette overlay and stop ambient motion while idle.
+- Bind lyric highlights to their exact video and timed transcript. Do not attach old lines to a new track's audio clock; settle the active cue in a layout effect before painting.
+- Fade each newly available transcript in over 280 ms, with original and translated lyrics together. Normal highlighting and translation updates do not restart the entry fade; reduced-motion preferences disable it.
+
+
 ## 0.7.7-beta.2
 
 - Decode each new cover before a two-layer crossfade; cancel stale image loads and retire the previous cover after the fade. Preserve the last cover while Cast completes its metadata.

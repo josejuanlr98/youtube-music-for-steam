@@ -1,5 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
 function load(file,modules={},globals={}){
+  if(modules.react)modules.react.useLayoutEffect??=modules.react.useEffect;
   const exports={};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{
     exports,require:name=>name==='../services/browseState'?(modules[name]||require('./browse_fixture.cjs')):name==='../services/pagination'?load('src/services/pagination.ts',{react:modules.react,'./focus':modules['../services/focus']||{focusLyricsReader:()=>()=>{}}},globals):name==='../services/lyricColor'?load('src/services/lyricColor.ts'):name==='../services/librarySort'?load('src/services/librarySort.ts',{},globals):modules[name]||{},console,setTimeout,clearTimeout,...globals,
@@ -59,7 +60,7 @@ function lyricPairTests(){
   const timed=[{text:'Original first line',start:0,end:2},{text:'Original second line',start:2,end:4}];
   const modules={
     'react/jsx-runtime':{jsx,jsxs:jsx},
-    react:{useState:value=>{const slot=index++;return [slot===3?{lyrics:timed.map(x=>x.text).join('\n'),timedLines:timed}:slot===4?['Primera traducción','Segunda traducción']:slot===8?false:slot===10?active:typeof value==='function'?value():value,()=>{}];},useRef:()=>({current:null}),useEffect(){}},
+    react:{useState:value=>{const slot=index++;return [slot===3?{lyrics:timed.map(x=>x.text).join('\n'),timedLines:timed}:slot===4?['Primera traducción','Segunda traducción']:slot===8?false:slot===10?{forVideoId:'song',lines:timed,index:active}:typeof value==='function'?value():value,()=>{}];},useRef:()=>({current:null}),useEffect(){}},
     '@decky/ui':{Focusable:'focusable',DialogButton:'button',Navigation:{},GamepadButton:{}},
     '../services/i18n':{useI18n:()=>({t:key=>key})},
     '../services/artworkPalette':{useArtworkPalette:()=>['100,100,100','90,90,90','80,80,80']},

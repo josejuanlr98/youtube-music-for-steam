@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
 const jsx=(type,props)=>({type,props});
-function load(file,modules,globals={}){const api={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports:api,require:name=>modules[name]||{},console,...globals});return api}
+function load(file,modules,globals={}){if(modules.react)modules.react.useLayoutEffect??=modules.react.useEffect;const api={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports:api,require:name=>modules[name]||{},console,...globals});return api}
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}};
 const tick=async()=>{for(let n=0;n<8;n++)await Promise.resolve()};
 (async()=>{

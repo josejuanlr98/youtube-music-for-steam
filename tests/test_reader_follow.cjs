@@ -22,6 +22,7 @@ async function readerTest(fullScreen,cast,timed=true){
     useRef:initial=>{const index=cursor++;slots[index]??={current:initial};return slots[index];},
     useEffect:(fn,deps)=>{const index=cursor++,old=slots[index];if(!old||deps.some((value,i)=>value!==old.deps[i])){slots[index]={deps,cleanup:old?.cleanup};queue.push(()=>{slots[index].cleanup?.();slots[index].cleanup=fn();});}},
   };
+  react.useLayoutEffect=react.useEffect;
   const pump=async()=>{for(let n=0;n<10;n++){
     while(dirty){dirty=false;cursor=0;tree=component({fullScreen});
       for(const node of walk(tree))if(node.props?.ref)node.props.ref.current=node.props.className?.includes('ytm-reader')?reader:root;

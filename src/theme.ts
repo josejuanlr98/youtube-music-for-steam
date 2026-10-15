@@ -28,10 +28,12 @@ export const themeCss = `
 @keyframes ytm-route-enter { from { opacity:.94; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @keyframes ytm-pulse { 0%, 100% { opacity:.68; } 50% { opacity:.32; } }
 @keyframes ytm-backdrop-fadeout { from { opacity:1; } to { opacity:0; } }
+@keyframes ytm-lyrics-enter { from { opacity:0; } to { opacity:1; } }
+.ytm-lyrics-enter { animation:ytm-lyrics-enter 280ms ease-out both; }
 @keyframes ytm-cover-crossfade { from { opacity:0; } to { opacity:1; } }
 .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page { animation:none; }
 .ytm-playlist-shell,.ytm-search-content { animation:ytm-route-enter 110ms cubic-bezier(.22,1,.36,1) both; }
-@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page,.ytm-playlist-shell,.ytm-search-content,.ytm-cover-current,.ytm-atmosphere-prev { animation:none !important; } .ytm-atmosphere-prev { display:none !important; } }
+@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page,.ytm-playlist-shell,.ytm-search-content,.ytm-cover-current,.ytm-atmosphere-prev,.ytm-lyrics-enter { animation:none !important; } .ytm-atmosphere-prev { display:none !important; } }
 .ytm-ui .ytm-button { border:1px solid #3b485b; border-radius:8px !important; background:#273446; color:#f4f6fa; min-width:0 !important; max-width:100%; box-sizing:border-box; }
 .ytm-ui .ytm-button:hover { background:#36465b; }
 .ytm-ui .ytm-compact-slider.gpfocus,.ytm-ui .ytm-compact-slider:focus,.ytm-ui .ytm-button:focus,.ytm-ui .ytm-button.gpfocus { outline:none !important; outline-offset:0; border-color:#596572; background-color:#35445a; color:#fff; box-shadow:none !important; }

@@ -3,7 +3,7 @@ import { acquireFullscreenPower } from '../services/fullscreenPower';
 import { returnBrowseToPlayer, backFromBrowse } from '../services/browseNavigation';
 import { translationColor } from '../services/lyricColor';
 import { DialogButton, Focusable, GamepadButton, Navigation } from '@decky/ui';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaExpand } from 'react-icons/fa';
 import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, getLivePlaybackPosition, addProgressListener, addPlayStateListener, getIsPlaying, playNext, playPrevious, togglePlayback } from '../services/audioManager';
 import { loadLyrics, loadTranslatedLyrics, cachedLyrics, retainLyricsReader, type LyricsResult } from '../services/lyrics';
@@ -59,7 +59,8 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   }, [track?.videoId, loading, result.lyrics]);
 
   const rootRef = useRef<HTMLDivElement>(null);
-  const [activeLine, setActiveLine] = useState(-1);
+  const [highlight, setHighlight] = useState<{forVideoId?:string;lines?:LyricsResult['timedLines'];index:number}>({index:-1});
+  const activeLine = highlight.forVideoId === track?.videoId && highlight.lines === result.timedLines ? highlight.index : -1;
   const autoScroll = useRef<{ pause():boolean|void; dispose():void; setPlaying?(value:boolean):void } | null>(null);
   useEffect(() => focusLyricsReader(fullScreen ? rootRef.current : scrollRef.current), [fullScreen]);
   useEffect(() => retainLyricsReader(), []);
@@ -80,7 +81,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     setLoading(!!currentId && !cached?.lyrics && !(sameSong && result.lyrics));
     if (!sameSong) {
       setResult(cached ? { ...cached, forVideoId:currentId } : {});
-      setActiveLine(-1);
+      setHighlight({index:-1});
       manualScroll.current?.cancel();
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
@@ -174,8 +175,8 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
 
   useEffect(() => fullScreen ? suppressFullscreenNotifications() : undefined, [fullScreen]);
   useEffect(() => addCastConnectionListener((connected, sender) => setCast({ connected, sender })), []);
-  useEffect(() => {
-    if (loading || !result.lyrics || !scrollRef.current) return;
+  useLayoutEffect(() => {
+    if (loading || !track?.videoId || result.forVideoId !== track.videoId || !result.lyrics || !scrollRef.current) return;
     const lines = result.timedLines;
     const move=(top:number,instant:boolean)=>{
       if(manualScroll.current)manualScroll.current.scrollTo(top,instant);
@@ -204,20 +205,20 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
             if (getIsPlaying() && rootRef.current?.ownerDocument?.visibilityState !== 'hidden') wrapped(getLivePlaybackPosition());
           }, 100);
           return () => { unsubscribe(); window.clearInterval(timer); };
-        }, setActiveLine, move)
+        }, index => setHighlight({forVideoId:track.videoId,lines,index}), move)
       : fullScreen ? startLyricsScroll(scrollRef.current, 2000) : null;
     if (!motion) return;
     if (!lines?.length) (motion as { setPlaying?(value:boolean):void }).setPlaying?.(playing);
     autoScroll.current = motion;
     return () => { motion.dispose(); autoScroll.current = null; };
-  }, [fullScreen, loading, result.lyrics, result.timedLines, track?.videoId]);
+  }, [fullScreen, loading, result.forVideoId, result.lyrics, result.timedLines, track?.videoId]);
   useEffect(() => {
     if (!result.timedLines?.length) autoScroll.current?.setPlaying?.(playing);
   }, [playing, result.timedLines]);
-  const staleTrack = !!(track?.videoId && result.forVideoId && result.forVideoId !== track.videoId);
+  const staleTrack = !!(result.forVideoId && result.forVideoId !== track?.videoId);
   const effectiveLoading = loading || staleTrack;
   const centered = fullScreen && (!track || (!effectiveLoading && !result.lyrics && !result.error));
-  const source = lyricsSource(result.source);
+  const source = lyricsSource(staleTrack ? undefined : result.source);
   const pauseMotion = () => { if(autoScroll.current?.pause())manualScroll.current?.cancel(); };
   const pauseForPointer = () => { pauseMotion(); manualScroll.current?.cancel(); };
   useEffect(() => {
@@ -275,7 +276,9 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     ? { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: 'clamp(18px, 3vw, 40px)', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, textAlign: 'center' as const, fontFamily:'"YouTube Sans", Roboto, Arial, sans-serif', fontSize: 'clamp(20px, 2.1vw, 32px)', lineHeight: 1.72, letterSpacing:'-.014em', whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const }
     : { flex: '1 1 0', minHeight: 0, boxSizing: 'border-box' as const, padding: '10px 12px', overflowY: 'scroll' as const, overscrollBehavior: 'contain' as const, scrollBehavior: 'auto' as const, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' as const, overflowWrap: 'anywhere' as const };
 
-  const lyricsContent = effectiveLoading
+  const lyricsContent = !track?.videoId
+    ? 'Your next song starts here.'
+    : effectiveLoading
     ? <div className="ytm-muted" style={fullScreen ? { height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:500, opacity:0, letterSpacing:'.02em', animation:'ytm-pulse 1.8s ease-in-out 400ms infinite' } : undefined}>{t('lyrics.loading')}</div>
     : result.error
       ? (
@@ -325,7 +328,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
         }
       }}>
       <ThemeScope />
-      {fullScreen && <ArtworkBackdrop palette={palette} animated />}
+      {fullScreen && <ArtworkBackdrop palette={palette} animated idle={!track?.videoId} />}
       {!fullScreen && <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexShrink: 0, minHeight:28, alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
         {!fullScreen && <div style={{ display:'inline-flex', alignItems:'center', gap:4, flexShrink:0 }}><SiYoutubemusic className="ytm-cover-logo" size={20} style={{ color:`rgb(${accent})`, flexShrink:0 }} aria-label="YouTube Music" /><svg className="ytm-wordmark" viewBox="27.8 0 42.5 24" aria-hidden="true" style={{ display:'block', height:20, width:'auto', fill:translatedColor, flexShrink:0 }}><path d={MUSIC_WORDMARK_PATH} /></svg></div>}
         <div style={{ minWidth: 0, flex: 1, padding: 0 }} />
@@ -383,7 +386,9 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
               }
             }}
             style={{ ...readerStyle, outline:'none', ...(fullScreen ? { background:'transparent', border:0, boxShadow:'none', WebkitMaskImage:result.error || effectiveLoading ? 'none' : 'linear-gradient(transparent,#000 12%,#000 86%,transparent)' } : {}) }}>
-            {lyricsContent}
+            {!!track?.videoId && !effectiveLoading && !result.error && result.lyrics
+              ? <div key={track?.videoId} className="ytm-lyrics-enter">{lyricsContent}</div>
+              : lyricsContent}
           </Focusable>
 
         </div>}
