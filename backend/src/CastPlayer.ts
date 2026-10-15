@@ -230,6 +230,9 @@ export class CastPlayer extends Player {
     return super.pause(AID);
   }
   private metadataCache: Map<string, AudioInfo> = new Map();
+  private prefetchedAudio: Map<string, { info: AudioInfo; time: number }> = new Map();
+  private prefetchingPromises: Map<string, Promise<AudioInfo>> = new Map();
+  private prefetchedForPlaybackId: string | null = null;
   private enrichingMetadata = false;
   private visibleMetadata: string[] = [];
   private metadataFailures = new Map<string, number>();
@@ -280,6 +283,10 @@ export class CastPlayer extends Player {
     this.armHeartbeat();
     if (currentTime > 2) this.failedTracks = 0;
     if (duration > 0) this.currentDuration = duration;
+    if (this.playing && currentTime >= 1 && this.currentTrackInfo?.url && this.prefetchedForPlaybackId !== this.playbackId) {
+      this.prefetchedForPlaybackId = this.playbackId;
+      void this.prefetchNextTrack();
+    }
     // Reuse the existing progress messages; no new idle timer or polling loop.
     if (this.playing && Date.now() - this.lastSenderSync >= 30000)
       void this.syncSender(id).catch(err => console.warn('[YTCast] State sync failed:', err));
@@ -339,6 +346,7 @@ export class CastPlayer extends Player {
     this.retryingPlaybackId = id as string;
     const generation = this.playbackGeneration;
 
+    this.prefetchedAudio.delete(this.currentTrackInfo.videoId);
     try {
       const info = await extractAudioInfo(this.currentTrackInfo.videoId, this.ytdlpPath);
       if (generation !== this.playbackGeneration) return;
@@ -386,6 +394,9 @@ export class CastPlayer extends Player {
   clearOnDisconnect(): void {
     this.stopHeartbeat();
     this.deckOrder = null;
+    this.prefetchedAudio.clear();
+    this.prefetchingPromises.clear();
+    this.prefetchedForPlaybackId = null;
     this.playRequest++;
     this.playbackGeneration++;
     this.playbackId = null;
@@ -408,6 +419,47 @@ export class CastPlayer extends Player {
   getSenderIdleMs(): number {
     if (this.lastSenderActivity === 0) return Infinity;
     return Date.now() - this.lastSenderActivity;
+  }
+
+  private getNextQueueVideoId(): string | null {
+    const currentId = this.queue.current?.id ?? this.currentTrackInfo?.videoId;
+    if (!currentId) return null;
+    const ids = this.deckOrder ?? this.queue.videoIds;
+    const index = ids.indexOf(currentId);
+    return index >= 0 && index + 1 < ids.length ? ids[index + 1] : null;
+  }
+
+  private resolveTrackAudio(videoId: string): Promise<AudioInfo> {
+    const cached = this.prefetchedAudio.get(videoId);
+    if (cached && Date.now() - cached.time < 600000) return Promise.resolve(cached.info);
+    const inflight = this.prefetchingPromises.get(videoId);
+    if (inflight) return inflight;
+    const task = Promise.resolve(extractAudioInfo(videoId, this.ytdlpPath)).then(info => {
+      if (info && info.url && !this.sessionCleared) {
+        if (this.prefetchedAudio.size >= 8 && !this.prefetchedAudio.has(videoId)) {
+          this.prefetchedAudio.delete(this.prefetchedAudio.keys().next().value!);
+        }
+        this.prefetchedAudio.set(videoId, { info, time: Date.now() });
+        this.metadataCache.set(videoId, info);
+      }
+      return info;
+    }).finally(() => {
+      if (this.prefetchingPromises.get(videoId) === task) this.prefetchingPromises.delete(videoId);
+    });
+    this.prefetchingPromises.set(videoId, task);
+    return task;
+  }
+
+  async prefetchNextTrack(): Promise<boolean> {
+    if (this.sessionCleared || !this.playing) return false;
+    const nextId = this.getNextQueueVideoId();
+    if (!nextId) return false;
+    try {
+      const info = await this.resolveTrackAudio(nextId);
+      return !!(info && info.url);
+    } catch {
+      return false;
+    }
   }
 
   getCurrentTrackInfo(): AudioInfo | null {
@@ -552,7 +604,7 @@ export class CastPlayer extends Player {
     try {
       this.markSenderActivity();
       this.sessionCleared = false;
-      const info = await extractAudioInfo(video.id, this.ytdlpPath);
+      const info = await this.resolveTrackAudio(video.id);
       if (generation !== this.playbackGeneration) return false;
       this.currentTrackInfo = info;
       this.metadataCache.set(video.id, info);

@@ -30,9 +30,37 @@ PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
 NODE_BIN_SRC = os.path.join(PLUGIN_DIR, "bin", "node")
 YTDLP_BIN_SRC = os.path.join(PLUGIN_DIR, "bin", "yt-dlp")
 SERVER_JS = os.path.join(PLUGIN_DIR, "backend", "out", "server.cjs")
+from collections import deque
+
 RUNTIME_DIR = "/tmp/youtube-music-cast-receiver"
 NODE_BIN = os.path.join(RUNTIME_DIR, "node")
 YTDLP_BIN = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime", "yt-dlp")
+YTDLP_CACHE_DIR = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "audio-runtime", "cache")
+CAST_DATASTORE_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "datastore.json")
+
+
+def _stage_node_binary(src, dst):
+    src_stat = os.stat(src)
+    try:
+        dst_stat = os.stat(dst)
+        if dst_stat.st_size == src_stat.st_size and dst_stat.st_mtime_ns == src_stat.st_mtime_ns:
+            os.chmod(dst, 0o755)
+            return
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    tmp_dst = f"{dst}.tmp.{os.getpid()}"
+    try:
+        shutil.copyfile(src, tmp_dst)
+        os.chmod(tmp_dst, 0o755)
+        os.utime(tmp_dst, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        os.replace(tmp_dst, dst)
+    finally:
+        if os.path.exists(tmp_dst):
+            try:
+                os.unlink(tmp_dst)
+            except OSError:
+                pass
 
 
 def _stage_runtime_binaries():
@@ -44,8 +72,7 @@ def _stage_runtime_binaries():
             if src == YTDLP_BIN_SRC:
                 stage_extractor(src, dst)
             else:
-                with open(src, "rb") as source:
-                    atomic_write(dst, source.read(), 0o755)
+                _stage_node_binary(src, dst)
         except OSError as e:
             logger.warning(f"Could not refresh {dst}: {e}; using existing copy")
         try:
@@ -108,13 +135,54 @@ class Plugin:
             self._ytm_lock = threading.RLock()
         return self._ytm_lock
 
+    def _acquire_bulk_session(self):
+        import requests
+        from functools import partial
+        with self._account_lock():
+            pool = getattr(self, '_bulk_sessions', None)
+            if pool:
+                return pool.pop()
+        session = requests.Session()
+        session.request = partial(session.request, timeout=(5, 12))
+        return session
+
+    def _release_bulk_session(self, client, session, healthy=True):
+        if not healthy or self.ytmusic is not client:
+            try:
+                session.close()
+            except Exception:
+                pass
+            return
+        with self._account_lock():
+            pool = getattr(self, '_bulk_sessions', None)
+            if pool is None:
+                pool = self._bulk_sessions = deque()
+            if len(pool) < 4:
+                pool.append(session)
+                return
+        try:
+            session.close()
+        except Exception:
+            pass
+
+    def _clear_bulk_sessions(self):
+        with self._account_lock():
+            pool = getattr(self, '_bulk_sessions', None)
+            self._bulk_sessions = deque()
+        if pool:
+            for session in pool:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
     async def _api_call(self, method, *args, **kwargs):
         # requests.Session and ytmusicapi's mutable headers must not race.
         client = self.ytmusic
         if client is None:
             raise RuntimeError('Not authenticated')
-        # Catalogue and continuation reads use independent bounded sessions so
-        # they cannot block playback or account mutations behind a shared lock.
+        # Catalogue and continuation reads use independent pooled Keep-Alive
+        # sessions so they cannot block playback while avoiding repeated TLS handshakes.
         from ytmusicapi import YTMusic
         bulk = method in ('get_playlist', 'get_liked_songs', 'get_library_playlists', 'get_library_albums',
                           'get_library_artists', 'get_library_songs', 'get_artist',
@@ -122,15 +190,16 @@ class Plugin:
         if bulk and isinstance(client, YTMusic):
             headers = dict(client._auth_headers)
             def read_bulk():
-                import requests
-                from functools import partial
-                session = requests.Session()
-                session.request = partial(session.request, timeout=(5, 12))
+                session = self._acquire_bulk_session()
+                healthy = True
                 try:
                     candidate = YTMusic(headers, requests_session=session)
                     return getattr(candidate, method)(*args, **kwargs)
+                except Exception:
+                    healthy = False
+                    raise
                 finally:
-                    session.close()
+                    self._release_bulk_session(client, session, healthy)
             return await asyncio.to_thread(read_bulk)
         def invoke():
             from requests.exceptions import ConnectionError, Timeout
@@ -244,6 +313,9 @@ class Plugin:
     async def _check_audio_updates(self):
         while True:
             try:
+                if self.node_process is not None and self.node_process.poll() is not None:
+                    decky.logger.warning("Cast backend process exited unexpectedly; restarting...")
+                    await self._start_cast_backend()
                 status = await asyncio.to_thread(check_for_update, YTDLP_BIN, NODE_BIN)
                 if status['status'] != 'cached':
                     decky.logger.info(f"Audio engine update: {status['status']} {status.get('version', status.get('error', ''))}")
@@ -255,7 +327,7 @@ class Plugin:
         if not os.path.exists(SERVER_JS):
             decky.logger.error(f"Cast backend not found: {SERVER_JS}")
             return
-        _stage_runtime_binaries()
+        await asyncio.to_thread(_stage_runtime_binaries)
         if not os.path.exists(NODE_BIN):
             decky.logger.error("Integrated Cast Receiver requires bin/node.")
             return
@@ -263,6 +335,8 @@ class Plugin:
             **os.environ,
             "NODE_ENV": "production",
             "YTCAST_YTDLP_PATH": YTDLP_BIN if os.path.exists(YTDLP_BIN) else YTDLP_BIN_SRC,
+            "YTCAST_CACHE_DIR": YTDLP_CACHE_DIR,
+            "YTCAST_DATASTORE_FILE": CAST_DATASTORE_FILE,
             "YTCAST_DEVICE_NAME": self.cast_device_name,
             "YTCAST_BROWSER_AUTH_FILE": BROWSER_AUTH_FILE,
         }
@@ -363,6 +437,7 @@ class Plugin:
                 await update
             except asyncio.CancelledError:
                 pass
+        self._clear_bulk_sessions()
         decky.logger.info("Stopping integrated YouTube Cast Receiver...")
         await self._stop_cast_backend()
         decky.logger.info("YouTube Music plugin unloaded")
@@ -477,9 +552,11 @@ class Plugin:
             self._ratings = {}
             self._rating_checked = {}
             self.authenticated = True
+            self._clear_bulk_sessions()
             self._cached_playlists = None
             self._playlist_tracks_cache = {}
             self._playlist_preview_cache = {}
+            self._playlist_start_urls = {}
             return {'success': True}
         except Exception as e:
             decky.logger.warning(f'Header validation failed: {type(e).__name__}')
@@ -498,7 +575,9 @@ class Plugin:
         self.shuffle = False
         self.shuffle_order = []
         self.repeat = "NONE"
+        self._clear_bulk_sessions()
         self._cached_playlists = None
+        self._playlist_start_urls = {}
         if os.path.exists(BROWSER_AUTH_FILE):
             try:
                 os.remove(BROWSER_AUTH_FILE)
@@ -536,6 +615,7 @@ class Plugin:
             # Strip LD_LIBRARY_PATH to avoid Decky's bundled OpenSSL conflicting
             # with the system Python's ssl module (same fix as Deckify)
             env.pop('LD_LIBRARY_PATH', None)
+            env['XDG_CACHE_HOME'] = YTDLP_CACHE_DIR
             node = NODE_BIN if os.path.exists(NODE_BIN) else NODE_BIN_SRC
             self._check_audio_runtime(node, env)
 
@@ -560,8 +640,23 @@ class Plugin:
                     offset = 1 if ytdlp else 3
                     command[offset:offset] = ['--cookies', cookies]
                 result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=25)
+                url = (result.stdout or '').strip().splitlines()[0] if (result.stdout or '').strip() else ''
+                stderr_lower = (result.stderr or '').lower()
+                if (result.returncode != 0 or not url.startswith('http')) and any(
+                    token in stderr_lower for token in (
+                        'requested format is not available',
+                        'signature extraction failed',
+                        'nsig extraction failed',
+                        'sabr',
+                        'drm protected',
+                    )
+                ):
+                    fallback_cmd = list(command)
+                    fallback_cmd[-1:-1] = ['--extractor-args', 'youtube:player_client=tv,ios,mweb']
+                    fallback_cmd[-1] = f'https://www.youtube.com/watch?v={video_id}'
+                    result = subprocess.run(fallback_cmd, capture_output=True, text=True, env=env, timeout=25)
+                    url = (result.stdout or '').strip().splitlines()[0] if (result.stdout or '').strip() else ''
 
-            url = result.stdout.strip()
             if result.returncode != 0 or not url or not url.startswith('http'):
                 failure = _audio_failure(result.stderr)
                 decky.logger.warning(f"Audio lookup failed for {video_id}: {failure.code if failure else 'VIDEO_UNAVAILABLE'}")
@@ -600,10 +695,137 @@ class Plugin:
 
     # ── Playback controls ──────────────────────────────────────────
 
+    def _cached_stream_url(self, video_id, max_age=600):
+        starts = getattr(self, '_playlist_start_urls', {})
+        cached = starts.get(video_id)
+        if cached and cached[0] is self.ytmusic and time.monotonic() - cached[1] < max_age:
+            return cached[2]
+        return None
+
+    def _store_stream_url(self, client, video_id, url, max_age=600):
+        if not url or not video_id or self.ytmusic is not client:
+            return
+        now = time.monotonic()
+        starts = {k: v for k, v in getattr(self, '_playlist_start_urls', {}).items()
+                  if v[0] is client and now - v[1] < max_age}
+        if len(starts) >= 16 and video_id not in starts:
+            starts.pop(next(iter(starts)))
+        starts[video_id] = (client, now, url)
+        self._playlist_start_urls = starts
+
+    def _peek_queue_index(self, steps=1):
+        if not self.queue:
+            return None
+        if self.repeat == "ONE":
+            return self.queue_position if 0 <= self.queue_position < len(self.queue) else None
+        if self.shuffle and self.shuffle_order:
+            try:
+                shuffle_idx = self.shuffle_order.index(self.queue_position) + steps
+            except ValueError:
+                shuffle_idx = 0
+            if shuffle_idx >= len(self.shuffle_order):
+                if self.repeat == "ALL" and self.shuffle_order:
+                    shuffle_idx = shuffle_idx % len(self.shuffle_order)
+                else:
+                    return None
+            elif shuffle_idx < 0:
+                if self.repeat == "ALL" and self.shuffle_order:
+                    shuffle_idx = len(self.shuffle_order) - 1
+                else:
+                    shuffle_idx = 0
+            next_pos = self.shuffle_order[shuffle_idx]
+        else:
+            next_pos = self.queue_position + steps
+            if next_pos >= len(self.queue):
+                if self.repeat == "ALL":
+                    next_pos = next_pos % len(self.queue)
+                else:
+                    return None
+            elif next_pos < 0:
+                if self.repeat == "ALL":
+                    next_pos = len(self.queue) - 1
+                else:
+                    next_pos = 0
+        return next_pos if 0 <= next_pos < len(self.queue) else None
+
+    def _peek_next_video_id(self, steps=1):
+        idx = self._peek_queue_index(steps)
+        return self.queue[idx].get("videoId") if idx is not None else None
+
+    async def peek_queue_track(self, direction=1):
+        """Return metadata of the adjacent track in <1ms without waiting for yt-dlp."""
+        idx = self._peek_queue_index(1 if direction >= 0 else -1)
+        if idx is None or not (0 <= idx < len(self.queue)):
+            return {'stopped': True}
+        track = self.queue[idx]
+        return {
+            "videoId": track.get("videoId", ""),
+            "title": track.get("title", ""),
+            "artist": track.get("artist", ""),
+            "album": track.get("album", ""),
+            "albumArt": track.get("albumArt", ""),
+            "duration": track.get("duration", 0),
+            "queuePosition": idx,
+            "queueLength": len(self.queue),
+        }
+
+    async def _resolve_stream_url(self, video_id, max_age=600):
+        """Resolve a streaming URL using cache or sharing an in-flight extraction task."""
+        cached = self._cached_stream_url(video_id, max_age=max_age)
+        if cached:
+            return cached
+        inflight = getattr(self, '_inflight_url_tasks', None)
+        if inflight is None:
+            inflight = self._inflight_url_tasks = {}
+        client = self.ytmusic
+        key = (id(client), video_id)
+        task = inflight.get(key)
+        if task is None:
+            async def fetch():
+                url = await asyncio.to_thread(self._get_streaming_url, video_id)
+                if url and self.ytmusic is client:
+                    self._store_stream_url(client, video_id, url, max_age=max(600, max_age))
+                return url
+            task = asyncio.create_task(fetch())
+            inflight[key] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and inflight.get(key) is task:
+                inflight.pop(key, None)
+
+    async def prefetch_next_track(self, lookahead=1):
+        """Pre-resolve upcoming queue items in the background so track transitions are instant."""
+        try:
+            steps_limit = max(1, min(2, int(lookahead or 1)))
+        except (TypeError, ValueError):
+            steps_limit = 1
+        first_id = self._peek_next_video_id(1)
+        if not first_id:
+            return {'prefetched': False}
+        was_cached = bool(self._cached_stream_url(first_id))
+        try:
+            url = await self._resolve_stream_url(first_id)
+        except Exception:
+            return {'prefetched': False}
+        if not url:
+            return {'prefetched': False}
+        if steps_limit >= 2:
+            second_id = self._peek_next_video_id(2)
+            if second_id and second_id != first_id and not self._cached_stream_url(second_id):
+                try:
+                    await self._resolve_stream_url(second_id)
+                except Exception:
+                    pass
+        return {'prefetched': True, 'videoId': first_id, **({'cached': True} if was_cached else {})}
+
     async def get_current_track(self):
         """Return current track with fresh streaming URL."""
         if not self.queue:
             return {'error': 'No track in queue'}
+        if 0 <= self.queue_position < len(self.queue):
+            vid = self.queue[self.queue_position].get('videoId')
+            getattr(self, '_playlist_start_urls', {}).pop(vid, None)
         return await self.jump_to_queue(self.queue_position)
 
     async def resume(self):
@@ -669,8 +891,9 @@ class Plugin:
         if result is None:
             return {'stopped': True}
         target = self.queue_position
+        video_id = result['videoId']
         try:
-            url = await asyncio.to_thread(self._get_streaming_url, result['videoId'])
+            url = await self._resolve_stream_url(video_id)
         except AudioLookupError as error:
             if self.queue is snapshot and self.queue_position == target:
                 self.queue_position, self.is_playing = previous, playing
@@ -742,27 +965,29 @@ class Plugin:
 
     # ── Volume ─────────────────────────────────────────────────────
 
-    async def set_volume(self, value):
-        """Set volume. value is 0-100 from frontend."""
-        import subprocess
-        try:
-            value = float(value)
-        except (TypeError, ValueError):
-            return {"error": f"Invalid volume value: {value!r}"}
-        self.volume = max(0, min(100, value)) / 100.0  # store as 0.0-1.0
-
-        # Try to set PulseAudio volume for CEF sink-inputs
+    def _apply_pulse_volume(self, percentage):
         try:
             env = os.environ.copy()
             env.pop('LD_LIBRARY_PATH', None)
+            cached = getattr(self, '_pactl_sink_indices', None)
+            if cached:
+                ok = True
+                for idx in cached:
+                    res = subprocess.run(
+                        ["pactl", "set-sink-input-volume", idx, f"{percentage}%"],
+                        capture_output=True, env=env, timeout=5,
+                    )
+                    if getattr(res, 'returncode', 0) != 0:
+                        ok = False
+                        break
+                if ok:
+                    return
 
             result = subprocess.run(
                 ["pactl", "list", "sink-inputs"],
                 capture_output=True, text=True, env=env, timeout=5,
             )
-            output = result.stdout
-
-            # Parse sink-input indices for steamwebhelper
+            output = result.stdout or ""
             current_index = None
             indices = []
             for line in output.split("\n"):
@@ -773,8 +998,7 @@ class Plugin:
                     if current_index:
                         indices.append(current_index)
 
-            # Set volume on all matching sink-inputs
-            percentage = int(value)
+            self._pactl_sink_indices = indices
             for idx in indices:
                 subprocess.run(
                     ["pactl", "set-sink-input-volume", idx, f"{percentage}%"],
@@ -784,9 +1008,23 @@ class Plugin:
             if not indices:
                 decky.logger.debug("No steamwebhelper sink-inputs found for volume control")
         except Exception as e:
+            self._pactl_sink_indices = None
             decky.logger.warning(f"PulseAudio volume control failed (falling back to <audio> only): {e}")
 
-        self._save_settings()
+    async def set_volume(self, value):
+        """Set volume. value is 0-100 from frontend."""
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return {"error": f"Invalid volume value: {value!r}"}
+        self.volume = max(0, min(100, value)) / 100.0  # store as 0.0-1.0
+        percentage = int(value)
+
+        def apply_and_save():
+            self._apply_pulse_volume(percentage)
+            self._save_settings()
+
+        await asyncio.to_thread(apply_and_save)
         return {"volume": value}
 
     async def get_volume(self):
@@ -985,8 +1223,9 @@ class Plugin:
             return {'error': 'Invalid index'}
         snapshot = self.queue
         track = snapshot[index]
+        video_id = track['videoId']
         try:
-            url = await asyncio.to_thread(self._get_streaming_url, track['videoId'])
+            url = await self._resolve_stream_url(video_id)
         except AudioLookupError as error:
             return error.result()
         if snapshot is not self.queue or index >= len(self.queue) or self.queue[index] is not track:
@@ -1298,11 +1537,11 @@ class Plugin:
             tracks = []
             radio_error = None
             try:
-                watch = self.ytmusic.get_watch_playlist(videoId=video_id, radio=True)
+                watch = await self._api_call('get_watch_playlist', videoId=video_id, radio=True)
                 tracks = watch.get("tracks", []) or []
             except Exception as e:
                 radio_error = str(e)
-                if "endpoint" not in radio_error.lower():
+                if not isinstance(e, (KeyError, IndexError, TypeError)) and "endpoint" not in radio_error.lower():
                     raise
                 decky.logger.warning(f"Radio endpoint is unavailable for {video_id}; falling back to single-track playback")
 
@@ -1312,7 +1551,7 @@ class Plugin:
             # Always have a metadata fallback for the exact search result.
             if not tracks or not any(t.get("videoId") == video_id for t in tracks if isinstance(t, dict)):
                 try:
-                    details = self.ytmusic.get_song(video_id).get("videoDetails", {})
+                    details = (await self._api_call('get_song', video_id)).get("videoDetails", {})
                     song = {
                         "videoId": details.get("videoId") or video_id,
                         "title": details.get("title", "Unknown"),

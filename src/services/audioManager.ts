@@ -26,6 +26,8 @@ let queueRevision = 0;
 let queueMirror: Promise<unknown> = Promise.resolve();
 let localRetryId: string | null = null;
 let localManualPlayback = false;
+let prefetchedForVideoId: string | null = null;
+let deepPrefetchedForVideoId: string | null = null;
 let retryInFlight = false;
 let failedLocalTracks = 0;
 let skippingLocal = false;
@@ -179,6 +181,10 @@ function notifyQueue(tracks: TrackInfo[], position: number) {
 
 function notifyProgress(position: number, duration: number) { progressPosition = Math.max(0, position || 0); progressDuration = Math.max(0, duration || 0); progressListeners.forEach((fn) => fn(progressPosition, progressDuration)); }
 function notifyTrack(track: TrackInfo | null) {
+  if (track?.videoId !== currentTrack?.videoId) {
+    prefetchedForVideoId = null;
+    deepPrefetchedForVideoId = null;
+  }
   currentTrack = track;
   if (track) notifyPlaybackError('');
   trackChangeListeners.forEach((fn) => fn(track));
@@ -487,6 +493,15 @@ function onAudioTimeUpdate() {
   const duration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0;
   if (playbackSource === 'cast' && isPlaying && !audioElement.paused && Date.now() - lastCastReport >= 4000)
     sendCastPlayback('progress', {currentTime:audioElement.currentTime, duration});
+  if (playbackSource === 'local' && isPlaying && !audioElement.paused && currentTrack?.videoId) {
+    if (audioElement.currentTime >= 0.25 && prefetchedForVideoId !== currentTrack.videoId) {
+      prefetchedForVideoId = currentTrack.videoId;
+      void call('prefetch_next_track').catch(() => {});
+    } else if (audioElement.currentTime >= 3 && deepPrefetchedForVideoId !== currentTrack.videoId) {
+      deepPrefetchedForVideoId = currentTrack.videoId;
+      void call<[number], unknown>('prefetch_next_track', 2).catch(() => {});
+    }
+  }
   notifyProgress(audioElement.currentTime, duration);
   if (audioElement.currentTime > 2) failedLocalTracks = 0;
 }
@@ -547,6 +562,10 @@ async function loadAndPlay(track: TrackInfo, retry = false, manual = false) {
     if (generation !== playbackGeneration) return;
     notifyPlaying(true, manual);
     void call('resume');
+    if (track.videoId && prefetchedForVideoId !== track.videoId) {
+      prefetchedForVideoId = track.videoId;
+      void call('prefetch_next_track').catch(() => {});
+    }
   } catch (e) {
     if (generation !== playbackGeneration) return;
     console.error('[YTM] play failed:', e);
@@ -600,6 +619,8 @@ export function destroyAudio() {
   if (senderNameTimer) { clearTimeout(senderNameTimer); senderNameTimer = null; }
   playbackSource = null; castPlaybackId = null; pendingCastEnded = false;
   localManualPlayback=false;
+  prefetchedForVideoId=null;
+  deepPrefetchedForVideoId=null;
   castQueue = { tracks: [], position: -1 };
   trackChangeListeners = []; playStateListeners = [];
   playbackStartedListeners = []; senderConnectedListeners = [];
@@ -646,24 +667,58 @@ export function togglePlayback() {
   if (isPlaying) pausePlayback(); else resumePlayback();
 }
 export async function playNext() {
-  if (usesCast()) { await castPost('/api/next'); return; }
-  const generation = playbackGeneration;
+  if (usesCast()) {
+    audioElement?.pause();
+    await castPost('/api/next');
+    return;
+  }
+  const previousTrack = currentTrack;
+  const generation = ++playbackGeneration;
+  audioElement?.pause();
+  notifyPlaying(false);
+  notifyProgress(0, 0);
+  void call<[number], TrackInfo & { stopped?: boolean }>('peek_queue_track', 1).then(preview => {
+    if (generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
+      notifyTrack({ ...preview, url: '' });
+      notifyProgress(0, preview.duration || 0);
+    }
+  }).catch(() => {});
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('next_track');
   if (generation !== playbackGeneration) return;
   if (result.stopped) { clearPlayback(); return; }
-  if (result.error) throw new Error(result.error);
+  if (result.error) {
+    if (previousTrack) notifyTrack(previousTrack);
+    throw new Error(result.error);
+  }
   if (!result.url) return;
-  await loadAndPlay(result);
+  await loadAndPlay(result, false, true);
 }
 export async function playPrevious() {
-  if (usesCast()) { await castPost('/api/prev'); return; }
-  const generation = playbackGeneration;
+  if (usesCast()) {
+    audioElement?.pause();
+    await castPost('/api/prev');
+    return;
+  }
+  const previousTrack = currentTrack;
+  const generation = ++playbackGeneration;
+  audioElement?.pause();
+  notifyPlaying(false);
+  notifyProgress(0, 0);
+  void call<[number], TrackInfo & { stopped?: boolean }>('peek_queue_track', -1).then(preview => {
+    if (generation === playbackGeneration && preview && typeof preview.videoId === 'string' && preview.videoId) {
+      notifyTrack({ ...preview, url: '' });
+      notifyProgress(0, preview.duration || 0);
+    }
+  }).catch(() => {});
   const result = await call<[], TrackInfo & { stopped?: boolean; error?: string }>('previous_track');
   if (generation !== playbackGeneration) return;
   if (result.stopped) return;
-  if (result.error) throw new Error(result.error);
+  if (result.error) {
+    if (previousTrack) notifyTrack(previousTrack);
+    throw new Error(result.error);
+  }
   if (!result.url) return;
-  await loadAndPlay(result);
+  await loadAndPlay(result, false, true);
 }
 export function setAudioVolume(value: number) {
   applyVolume(value);

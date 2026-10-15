@@ -170,3 +170,130 @@ class AudioFailurePlaybackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await plugin.next_track())['code'], 'YOUTUBE_BLOCKED')
         self.assertEqual(plugin.queue_position, 0)
         plugin._get_streaming_url.assert_called_once()
+
+    async def test_prefetch_next_track_makes_advance_instant_and_error_recovery_refetches(self):
+        plugin = module.Plugin()
+        plugin.ytmusic = Mock()
+        plugin.queue = [{'videoId': 'song-1', 'title': 'One'}, {'videoId': 'song-2', 'title': 'Two'}]
+        plugin.queue_position = 0
+        plugin.is_playing = True
+        plugin._get_streaming_url = Mock(side_effect=['https://audio.test/two-prefetched', 'https://audio.test/two-fresh'])
+
+        prefetched = await plugin.prefetch_next_track()
+        self.assertTrue(prefetched['prefetched'])
+        self.assertEqual(prefetched['videoId'], 'song-2')
+        plugin._get_streaming_url.assert_called_once_with('song-2')
+
+        # Second prefetch call for the same next track is a no-op cache hit
+        cached_prefetch = await plugin.prefetch_next_track()
+        self.assertTrue(cached_prefetch.get('cached'))
+        self.assertEqual(plugin._get_streaming_url.call_count, 1)
+
+        # Advancing to song-2 uses the prefetched URL without spawning yt-dlp again
+        advanced = await plugin.next_track()
+        self.assertEqual(advanced['videoId'], 'song-2')
+        self.assertEqual(advanced['url'], 'https://audio.test/two-prefetched')
+        self.assertEqual(plugin._get_streaming_url.call_count, 1)
+
+        # Error recovery via get_current_track invalidates the cached URL and fetches fresh
+        recovered = await plugin.get_current_track()
+        self.assertEqual(recovered['url'], 'https://audio.test/two-fresh')
+        self.assertEqual(plugin._get_streaming_url.call_count, 2)
+
+    async def test_bulk_api_calls_reuse_keep_alive_sessions_and_close_on_signout(self):
+        from ytmusicapi import YTMusic
+        sessions = []
+        class TrackingClient(YTMusic):
+            def __init__(self, headers, requests_session=None):
+                self._session = requests_session
+                sessions.append(requests_session)
+            def search(self, *args, **kwargs):
+                return [{'videoId': 'v1'}]
+
+        plugin = module.Plugin()
+        with patch('ytmusicapi.YTMusic', TrackingClient):
+            plugin.ytmusic = client = object.__new__(TrackingClient)
+            client._auth_headers = {'cookie': 'synthetic'}
+            await plugin._api_call('search', 'one')
+            await plugin._api_call('search', 'two')
+            self.assertEqual(len(sessions), 2)
+            self.assertIs(sessions[0], sessions[1])
+            await plugin.sign_out()
+            self.assertEqual(len(getattr(plugin, '_bulk_sessions', [])), 0)
+
+    async def test_stage_node_binary_skips_rewrite_when_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'src_node'
+            dst = Path(tmp) / 'dst_node'
+            src.write_bytes(b'node-binary-content')
+            with patch.object(module.shutil, 'copyfile', wraps=module.shutil.copyfile) as copy_spy:
+                module._stage_node_binary(str(src), str(dst))
+                self.assertEqual(copy_spy.call_count, 1)
+                module._stage_node_binary(str(src), str(dst))
+                self.assertEqual(copy_spy.call_count, 1)
+
+    async def test_set_volume_caches_sink_inputs_and_runs_off_loop(self):
+        from types import SimpleNamespace
+        plugin = module.Plugin()
+        plugin._save_settings = Mock()
+        calls = []
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ['pactl', 'list']:
+                return SimpleNamespace(returncode=0, stdout='Sink Input #42\n\tapplication.name = "steamwebhelper"\n')
+            return SimpleNamespace(returncode=0, stdout='')
+        with patch.object(module.subprocess, 'run', side_effect=fake_run):
+            await plugin.set_volume(50)
+            await plugin.set_volume(65)
+        self.assertEqual(calls, [
+            ['pactl', 'list', 'sink-inputs'],
+            ['pactl', 'set-sink-input-volume', '42', '50%'],
+            ['pactl', 'set-sink-input-volume', '42', '65%'],
+        ])
+
+    async def test_next_track_shares_inflight_prefetch_without_duplicate_ytdlp_process(self):
+        import asyncio
+        import threading
+        plugin = module.Plugin()
+        plugin.ytmusic = Mock()
+        plugin.queue = [{'videoId': 'song-1', 'title': 'One'}, {'videoId': 'song-2', 'title': 'Two'}]
+        plugin.queue_position = 0
+        plugin.is_playing = True
+        started = threading.Event()
+        release = threading.Event()
+        calls = 0
+        def slow_extract(vid):
+            nonlocal calls
+            calls += 1
+            started.set()
+            release.wait(2)
+            return f'https://audio.test/{vid}'
+        plugin._get_streaming_url = slow_extract
+        prefetch_task = asyncio.create_task(plugin.prefetch_next_track())
+        self.assertTrue(await asyncio.to_thread(started.wait, 1))
+        next_task = asyncio.create_task(plugin.next_track())
+        await asyncio.sleep(0.05)
+        release.set()
+        pref_res, next_res = await asyncio.gather(prefetch_task, next_task)
+        self.assertTrue(pref_res['prefetched'])
+        self.assertEqual(next_res['url'], 'https://audio.test/song-2')
+        self.assertEqual(calls, 1)
+
+    async def test_phase4_ytdlp_retries_with_fallback_player_client_on_format_error(self):
+        from types import SimpleNamespace
+        plugin = module.Plugin()
+        plugin._check_audio_runtime = Mock()
+        cmds = []
+        def fake_run(cmd, **kwargs):
+            cmds.append(list(cmd))
+            if len(cmds) == 1:
+                return SimpleNamespace(returncode=1, stdout='', stderr='ERROR: [youtube] song: Requested format is not available')
+            return SimpleNamespace(returncode=0, stdout='https://audio.test/fallback-ok\n', stderr='')
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_ytdlp = Path(tmp) / 'yt-dlp'
+            fake_ytdlp.write_bytes(b'stub')
+            with patch.object(module, 'YTDLP_BIN', str(fake_ytdlp)), patch.object(module.subprocess, 'run', side_effect=fake_run):
+                url = plugin._get_streaming_url('song')
+        self.assertEqual(url, 'https://audio.test/fallback-ok')
+        self.assertEqual(len(cmds), 2)
+        self.assertIn('youtube:player_client=tv,ios,mweb', cmds[1])

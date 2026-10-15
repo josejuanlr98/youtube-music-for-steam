@@ -73,20 +73,29 @@ def signature(value):
 
 class LyricsResolver:
     def __init__(self, api_factory=None, http_get=None):
+        self._shared_session = None
+        self._uses_default_api = api_factory is None
         self.api_factory = api_factory or self._new_api
-        self.http_get = http_get or requests.get
+        self.http_get = http_get or self._session_get
         self.lock = threading.Lock()
         self.cache = OrderedDict()
         self.retry_after = 0
         self.last_request = 0
 
-    @staticmethod
-    def _new_api():
-        from functools import partial
+    def _get_shared_session(self):
+        if self._shared_session is None:
+            from functools import partial
+            session = requests.Session()
+            session.request = partial(session.request, timeout=8)
+            self._shared_session = session
+        return self._shared_session
+
+    def _session_get(self, *args, **kwargs):
+        return self._get_shared_session().get(*args, **kwargs)
+
+    def _new_api(self):
         from ytmusicapi import YTMusic
-        session = requests.Session()
-        session.request = partial(session.request, timeout=8)
-        return YTMusic(requests_session=session)
+        return YTMusic(requests_session=self._get_shared_session())
 
     def _lrclib(self, metadata):
         title, artist = metadata.get('title'), metadata.get('artist')
@@ -157,8 +166,14 @@ class LyricsResolver:
                 pass
             except Exception:
                 failed = True
+                if self._shared_session is not None:
+                    try:
+                        self._shared_session.close()
+                    except Exception:
+                        pass
+                    self._shared_session = None
             finally:
-                if api is not None and hasattr(api, '_session'):
+                if api is not None and hasattr(api, '_session') and not self._uses_default_api:
                     api._session.close()
             if not result.get('timedLines'):
                 try:

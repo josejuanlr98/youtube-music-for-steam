@@ -199,4 +199,19 @@ describe('Cast playback synchronization', () => {
     expect(await queued).toBe(false);
     expect(extractAudioInfo).not.toHaveBeenCalled();
   });
+
+  it('prefetches the next Cast track after 5s of playback and reuses it on advance', async () => {
+    const player = recoveringPlayer();
+    vi.mocked(extractAudioInfo).mockReset()
+      .mockResolvedValueOnce({ videoId:'b', title:'B', artist:'', albumArt:'', duration:180, url:'https://audio.test/b' })
+      .mockResolvedValueOnce({ videoId:'c', title:'C', artist:'', albumArt:'', duration:200, url:'https://audio.test/c' });
+    expect(await player.play({ id:'b', client:'YTMUSIC', context:{ playlistId:'playlist', index:1 } } as any)).toBe(true);
+    expect(extractAudioInfo).toHaveBeenCalledTimes(1);
+    player.updateProgress(6, 180, player.getPlaybackId());
+    await vi.waitFor(() => expect(extractAudioInfo).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(extractAudioInfo).mock.calls[1][0]).toBe('c');
+    expect(await player.play({ id:'c', client:'YTMUSIC', context:{ playlistId:'playlist', index:2 } } as any)).toBe(true);
+    expect(extractAudioInfo).toHaveBeenCalledTimes(2);
+    expect(player.getCurrentTrackInfo()?.url).toBe('https://audio.test/c');
+  });
 });

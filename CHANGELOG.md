@@ -1,5 +1,17 @@
 # Historial de cambios
 
+## 0.7.5
+
+- Meticulous optimization across Python, Node.js and the Steam/CEF interface, developed with assistance from Gemini 4 Argon.
+- Near-instant transitions for prepared tracks: local playback starts prefetching the next song as audio begins and requests a second upcoming song after three seconds. Cast prepares its next song after one second. Fresh cached URLs and shared in-flight extractions avoid starting the same yt-dlp work twice.
+- Next/Previous immediately silence the previous audio, reset the displayed progress and highlight the pressed control. Local playback previews the target metadata while resolving audio, and generation checks discard superseded UI responses.
+- Reuse HTTP Keep-Alive sessions for catalogue/lyric work and preserve the extractor cache through XDG_CACHE_HOME.
+- Skip copying an unchanged Node binary, perform staging and volume work off the Python event loop, reuse known audio sink indices, cache network detection by interface signature and use Decky's configured Cast datastore location.
+- Limit artwork sampling to three concurrent requests, debounce palette persistence by 400 ms and skip fine lyric-clock updates while paused or when the reader document is hidden.
+- Retry selected extractor signature/format failures with an alternate YouTube client profile, tolerate additional Radio/Mix parser failures and check for an exited Cast process during the existing maintenance loop.
+- Keep the empty Player's Find a song in Library hint neutral instead of inheriting the previous cover color; actual artist text retains its artwork-derived color.
+- Validation: 110 Python tests, 56 backend tests, 20 frontend regression suites, TypeScript checks, production builds and the actual extractor/runtime smoke probe. Transition speed depends on prefetch readiness and network/media loading; no universal millisecond benchmark is claimed.
+
 ## 0.7.4
 
 - Restore working audio extraction using official Node 22.23.3. The previously bundled Node 20 was incompatible with the JavaScript challenge component required by current yt-dlp.

@@ -134,7 +134,9 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     const motion = lines?.length
       ? followSyncedLyrics(scrollRef.current, lines, getLivePlaybackPosition, listener => {
           const unsubscribe = addProgressListener(listener);
-          const timer = window.setInterval(() => listener(getLivePlaybackPosition()), 100);
+          const timer = window.setInterval(() => {
+            if (getIsPlaying() && rootRef.current?.ownerDocument?.visibilityState !== 'hidden') listener(getLivePlaybackPosition());
+          }, 100);
           return () => { unsubscribe(); window.clearInterval(timer); };
         }, setActiveLine, move)
       : fullScreen ? startLyricsScroll(scrollRef.current, 2000) : null;

@@ -1,6 +1,6 @@
 {
   "name": "decky-youtube-music-cast",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "YouTube Music player and Cast receiver for SteamOS handhelds and PCs.",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "test:python": "python -m unittest discover -s tests -v",
     "build:backend": "node scripts/build_backend.mjs",
     "package": "powershell -ExecutionPolicy Bypass -File build.ps1",
-    "package:source": "python scripts/package_source.py --source . --output outputs/youtube-music-for-steam-0.7.4-source.zip --version 0.7.4",
+    "package:source": "python scripts/package_source.py --source . --output outputs/youtube-music-for-steam-0.7.5-source.zip --version 0.7.5",
     "typecheck:backend": "node scripts/check_backend_types.mjs"
   },
   "keywords": [
@@ -40,5 +40,10 @@
     "tslib": "^2.7.0",
     "ws": "^8.16.0",
     "yt-cast-receiver": "^2.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

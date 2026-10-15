@@ -159,17 +159,51 @@ export async function artworkPalette(original: string, doc: Document) {
   }
 }
 
+const MAX_CONCURRENT_SAMPLES = 3;
+let activeSamples = 0;
+const sampleQueue: Array<() => void> = [];
+let paletteSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPaletteStorage() {
+  paletteSaveTimer = null;
+  try {
+    localStorage.setItem(PALETTE_STORAGE, JSON.stringify([...cache].filter(([,palette]) => palette !== defaultPalette).slice(-64)));
+  } catch { /* Session cache still works without persistent storage. */ }
+}
+
+function schedulePaletteStorage() {
+  if (typeof setTimeout !== 'function') {
+    flushPaletteStorage();
+    return;
+  }
+  if (paletteSaveTimer !== null && typeof clearTimeout === 'function') clearTimeout(paletteSaveTimer);
+  paletteSaveTimer = setTimeout(flushPaletteStorage, 400);
+}
+
+function runBoundedSample<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      activeSamples++;
+      task().then(resolve, reject).finally(() => {
+        activeSamples--;
+        const next = sampleQueue.shift();
+        if (next) next();
+      });
+    };
+    if (activeSamples < MAX_CONCURRENT_SAMPLES) start();
+    else sampleQueue.push(start);
+  });
+}
+
 export function preloadArtworkPalette(original: string, doc: Document): Promise<ArtworkPalette> {
   const cached = cache.get(original);
   if (cached) return Promise.resolve(cached);
   let pending = pendingPalettes.get(original);
   if (!pending) {
-    pending = artworkPalette(original, doc).then(color => {
+    pending = runBoundedSample(() => artworkPalette(original, doc)).then(color => {
       if (cache.size >= 128) cache.delete(cache.keys().next().value!);
       cache.set(original, color);
-      if (color !== defaultPalette) try {
-        localStorage.setItem(PALETTE_STORAGE, JSON.stringify([...cache].filter(([,palette]) => palette !== defaultPalette).slice(-64)));
-      } catch { /* Session cache still works without persistent storage. */ }
+      if (color !== defaultPalette) schedulePaletteStorage();
       return color;
     }).finally(() => pendingPalettes.delete(original));
     pendingPalettes.set(original, pending);

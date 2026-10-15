@@ -26,6 +26,8 @@ export const PlayerView = () => {
   const currentVideo = useRef(track?.videoId);
   currentVideo.current = track?.videoId;
   const [stopping, setStopping] = useState(false);
+  const [skipping, setSkipping] = useState<'prev' | 'next' | null>(null);
+  const skipSeq = useRef(0);
   const [error, setError] = useState('');
   const [playbackError, setPlaybackError] = useState(getPlaybackError);
   useEffect(() => addPlaybackErrorListener(setPlaybackError), []);
@@ -69,9 +71,12 @@ export const PlayerView = () => {
     return () => { alive = false; };
   }, [authenticated, track?.videoId]);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const run = async (action: () => Promise<unknown>, direction?: 'prev' | 'next') => {
     setError('');
+    const seq = direction ? ++skipSeq.current : 0;
+    if (direction) setSkipping(direction);
     try { await action(); } catch (error) { setError(error instanceof Error ? error.message : 'Could not complete this action. Please try again.'); }
+    finally { if (direction && skipSeq.current === seq) setSkipping(null); }
   };
   const rate = async (value: string) => {
     if (!authenticated || !track) return;
@@ -105,7 +110,7 @@ export const PlayerView = () => {
             : <div style={{ width:'clamp(52px, 15vw, 64px)', height:'clamp(52px, 15vw, 64px)', borderRadius:4, background:'#344052', display:'grid', placeItems:'center', flexShrink:0 }}><FaMusic size={28} /></div>}
           <OverflowTextGroup textKey={`${track?.title}|${track?.artist}`} style={{ minWidth:0, maxWidth:'calc(100% - 74px)', textAlign:'center' }}>
             <div style={{ fontSize:15, fontWeight:700, lineHeight:1.3 }}><OverflowText text={track?.title ?? t('player.nothing')} /></div>
-            <div className="ytm-muted ytm-artist-name" style={{ color:track?.artist?detailColor:undefined, fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? t('player.find') : authReady ? 'Cast from your device' : '')} /></div>
+            <div className="ytm-muted ytm-artist-name" style={{ color:track?.artist?detailColor:'#b8bcbf', fontSize:13, marginTop:5 }}><OverflowText text={track?.artist || (authenticated ? t('player.find') : authReady ? 'Cast from your device' : '')} /></div>
           </OverflowTextGroup>
         </div>
       </div>
@@ -125,9 +130,9 @@ export const PlayerView = () => {
       </div>
 
       <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, minWidth:0, flexShrink:0 }}>
-        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.previous')} onClick={() => void run(playPrevious)}><IoPlaySkipBack size={19} /></DialogButton>
+        <DialogButton className={`ytm-button${skipping === 'prev' ? ' ytm-selected' : ''}`} style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.previous')} onClick={() => void run(playPrevious, 'prev')}><IoPlaySkipBack size={19} /></DialogButton>
         <DialogButton className="ytm-button" style={{ ...button, flex:1.35, height:34 }} disabled={!track || stopping} onOKActionDescription={isPlaying ? t('player.pause') : t('player.play')} onClick={togglePlayback}>{isPlaying ? <FaPause size={18} /> : <IoPlay size={22} />}</DialogButton>
-        <DialogButton className="ytm-button" style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.next')} onClick={() => void run(playNext)}><IoPlaySkipForward size={19} /></DialogButton>
+        <DialogButton className={`ytm-button${skipping === 'next' ? ' ytm-selected' : ''}`} style={{ ...button, height:34 }} disabled={!track || stopping} onOKActionDescription={t('common.next')} onClick={() => void run(playNext, 'next')}><IoPlaySkipForward size={19} /></DialogButton>
       </Focusable>
 
       <Focusable flow-children="horizontal" style={{ display:'flex', gap:6, minWidth:0, flexShrink:0 }}>

@@ -20,7 +20,7 @@ const binDir = path.join(pluginDir, 'bin');
 // reinstall) and points us at it via YTCAST_YTDLP_PATH. Fall back to
 // the in-folder path if the env var is missing (e.g. dev runs).
 const ytdlpPath = process.env.YTCAST_YTDLP_PATH || path.join(binDir, 'yt-dlp');
-const dataStorePath = '/home/deck/homebrew/settings/youtube-music/datastore.json';
+const dataStorePath = process.env.YTCAST_DATASTORE_FILE || '/home/deck/homebrew/settings/youtube-music/datastore.json';
 
 async function main() {
   console.log('[YTCast] Starting YouTube Cast Receiver backend...');
@@ -320,7 +320,7 @@ async function main() {
   // while it restarted after Stop. This only broadcasts on a real transition
   // or when the newly connected sender's name becomes available.
   const syncSenderIdentity = () => {
-    if (shuttingDown) return;
+    if (shuttingDown || (!advertising && !wasConnected)) return;
     const sender = receiver.getConnectedSenders()[0];
     if (!sender) return;
     const name = sender.name?.trim() || null;

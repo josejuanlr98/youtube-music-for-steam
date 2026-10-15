@@ -194,5 +194,32 @@ const track = (id) => ({ videoId:id, playbackId:`play-${id}`, title:id, url:`htt
   assert.deepEqual(starts.at(-1),['automatic',false],'the next automatic song still notifies');
   pick.api.destroyAudio();
   console.log('PASS manual selection stays silent through audio retries and resumes; automatic advancement notifies');
+  const prefetchTest = setup();
+  await prefetchTest.api.playTrack(track('song-a'));
+  assert.equal(prefetchTest.calls.filter(c => c === 'prefetch_next_track').length, 1, 'prefetch starts immediately when playback begins');
+  prefetchTest.audio.currentTime = 1;
+  prefetchTest.events.timeupdate();
+  assert.equal(prefetchTest.calls.filter(c => c === 'prefetch_next_track').length, 1, 'no duplicate prefetch before 3s');
+  prefetchTest.audio.currentTime = 4;
+  prefetchTest.events.timeupdate();
+  assert.equal(prefetchTest.calls.filter(c => c === 'prefetch_next_track').length, 2, 'deep 2-track lookahead fires once after 3s');
+
+  // Verify instant Next feedback: immediate audio pause, progress reset, and preview metadata before next_track finishes
+  const nextGate = defer();
+  prefetchTest.rpc(async (name) => {
+    if (name === 'peek_queue_track') return { videoId: 'song-b', title: 'Song B Preview', artist: 'Artist B', duration: 210 };
+    if (name === 'next_track') return nextGate.promise;
+    return { success: true };
+  });
+  const nextPromise = prefetchTest.api.playNext();
+  await tick();
+  assert.equal(prefetchTest.audio.paused, true, 'pressing Next silences old audio immediately');
+  assert.equal(prefetchTest.api.getCurrentTrack().videoId, 'song-b', 'pressing Next immediately shows next song metadata');
+  assert.equal(prefetchTest.api.getProgress().position, 0, 'pressing Next resets progress to 0 immediately');
+  nextGate.resolve(track('song-b'));
+  await nextPromise;
+  assert.equal(prefetchTest.api.getIsPlaying(), true);
+  prefetchTest.api.destroyAudio();
+  console.log('PASS immediate 0.0s prefetch, 2-track lookahead, and instant Next audio/UI response');
   console.log('PASS Cast transport: ownership during outage, replay after reconnect, playback IDs, stale responses and pause races');
 })().catch(error => { console.error(error); process.exitCode=1; });

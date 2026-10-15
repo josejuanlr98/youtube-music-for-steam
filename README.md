@@ -50,6 +50,14 @@ Download the latest installable ZIP from [Releases](https://github.com/josejuanl
 
 Cast works without signing into the plugin. To use account features such as Library, Search, likes, and lyrics, open **Settings → Account** and import a YouTube Music session from a supported Firefox-family browser. The browser must be installed on the SteamOS device, opened in Desktop Mode, and signed into YouTube Music first.
 
+## New in 0.7.5: meticulously optimized track transitions
+
+This release brings a meticulous optimization pass across Python, Node.js and the Steam/CEF interface, developed with assistance from **Gemini 4 Argon**. The main improvement is **near-instant transitions when the upcoming track has already been prepared**, alongside a more responsive Next/Previous interaction.
+
+Local playback starts resolving the next song as soon as audio starts, then prepares a second upcoming song after three seconds. Cast prepares the next song after one second. Upcoming URLs are cached for up to ten minutes, and playback shares an extraction already in progress instead of launching duplicate yt-dlp work. Next/Previous immediately stop the previous audio, reset the visible progress and highlight the requested control; local playback can preview the next song's artwork and metadata while its audio loads. A cache miss still needs extraction and media buffering, so transition time depends on readiness, the connection and YouTube's response.
+
+The same pass reuses catalogue/lyric HTTP connections, avoids copying an unchanged Node binary, reduces repeated network-detection subprocesses, and keeps staging and volume work off the Python event loop. Artwork sampling is limited to three concurrent jobs, palette storage writes are grouped, and fine lyric-clock updates are skipped while paused or when the reader document is hidden. Existing account privacy, automatic stable yt-dlp updates, lyrics, controller navigation and Steamcord compatibility remain part of the release. The idle Player's Find a song in Library hint now keeps a neutral color instead of inheriting the last song's artwork. See the [0.7.5 release notes](https://github.com/josejuanlr98/youtube-music-for-steam/releases/tag/v0.7.5) for implementation details and validation.
+
 ## Cast setup
 
 Open **Settings → Cast Receiver** and trust the network you use. Your phone and Steam system must be on the same local network. Client isolation, multicast filtering, and some mesh Wi-Fi configurations can prevent device discovery.
@@ -100,7 +108,7 @@ pnpm run test:python
 
 Run `pnpm run package` to create the Decky install ZIP. The package includes the compiled frontend and backend, Python dependencies, and Linux runtime binaries.
 
-The build verifies official Node and yt-dlp download checksums and executes the actual yt-dlp Node provider before packaging. CI runs the same compatibility check on Linux. The downloadable `SHA256SUMS-0.7.4.txt` file lists the installer and source archive hashes.
+The build verifies official Node and yt-dlp download checksums and executes the actual yt-dlp Node provider before packaging. CI runs the same compatibility check on Linux. The downloadable `SHA256SUMS-0.7.5.txt` file lists the installer and source archive hashes.
 
 ## Project and attribution
 
@@ -116,4 +124,4 @@ Library categories display a native first-page preview, then load more entries i
 
 Translation requests for different songs or target languages run independently. Same-song requests are shared, language detection is initialized safely, and repeated source-language detection is cached. Google Cloud Translation requires authentication; its unauthenticated web endpoint returned HTTP 429 during verification, so it is not used as a dependable no-key provider.
 
-AI tools assisted development and testing. Feedback is especially welcome: report the steps to reproduce a problem, your SteamOS/Decky versions, and whether you were playing directly or casting. Use it while gaming or enjoy fullscreen lyrics while games download, and tell us how it works for you.
+AI tools assisted development and testing. **Gemini 4 Argon** assisted the detailed optimization pass released in 0.7.5; Codex handled compilation, verification, the final empty-state color correction and release preparation. Feedback is especially welcome: report the steps to reproduce a problem, your SteamOS/Decky versions, and whether you were playing directly or casting. Use it while gaming or enjoy fullscreen lyrics while games download, and tell us how it works for you.

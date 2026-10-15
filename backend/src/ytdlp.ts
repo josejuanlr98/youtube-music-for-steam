@@ -44,7 +44,12 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
     }
     // Strip LD_LIBRARY_PATH and PYTHONPATH to avoid conflicts with
     // Decky Loader's environment overriding PyInstaller's bundled libraries
-    const env = { ...process.env, LD_LIBRARY_PATH: '', PYTHONPATH: '' };
+    const env = {
+      ...process.env,
+      LD_LIBRARY_PATH: '',
+      PYTHONPATH: '',
+      XDG_CACHE_HOME: process.env.YTCAST_CACHE_DIR || '/tmp/youtube-music-cast-receiver/cache',
+    };
     const session = audioSession();
     let proc: ReturnType<typeof spawn>;
     try { proc = spawn(
@@ -73,6 +78,44 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
     });
 
     proc.on('close', (code) => {
+      if (code !== 0 && /requested format is not available|signature extraction failed|nsig extraction failed|sabr|drm protected/i.test(stderr)) {
+        try {
+          const retryProc = spawn(
+            ytdlpPath,
+            [...session.args, '--ignore-config', '--socket-timeout', '15', '--retries', '1',
+              '--js-runtimes', `node:${process.execPath}`, '--remote-components', 'ejs:github',
+              '--extractor-args', 'youtube:player_client=tv,ios,mweb',
+              '-f', 'bestaudio[ext=m4a]/bestaudio', '-j', '--no-playlist', '--', videoId],
+            { stdio: ['ignore', 'pipe', 'pipe'], env }
+          );
+          let retryOut = '', retryErr = '';
+          retryProc.stdout?.on('data', (c: Buffer) => { retryOut += c.toString(); });
+          retryProc.stderr?.on('data', (c: Buffer) => { retryErr += c.toString(); });
+          retryProc.on('error', () => { clearTimeout(timeout); session.cleanup(); reject(classifyAudioFailure(stderr)); });
+          retryProc.on('close', (retryCode) => {
+            clearTimeout(timeout);
+            session.cleanup();
+            if (retryCode !== 0) { reject(classifyAudioFailure(retryErr || stderr)); return; }
+            try {
+              const data = JSON.parse(retryOut);
+              if (typeof data.url !== 'string' || !/^https?:\/\//.test(data.url)) throw new Error('No playable audio URL');
+              resolve({
+                videoId: data.id ?? videoId,
+                title: data.title ?? 'Unknown',
+                artist: data.uploader ?? data.channel ?? 'Unknown',
+                albumArt: data.thumbnail ?? '',
+                duration: data.duration ?? 0,
+                url: data.url ?? '',
+              });
+            } catch (err) {
+              reject(new AudioLookupError(`Failed to parse yt-dlp output: ${(err as Error).message}`));
+            }
+          });
+          return;
+        } catch {
+          // Fall through to normal error handling
+        }
+      }
       clearTimeout(timeout);
       session.cleanup();
       if (code !== 0) {
