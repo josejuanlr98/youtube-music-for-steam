@@ -27,9 +27,11 @@ export const themeCss = `
 .ytm-ui.ytm-player-view .ytm-stop:is(.gpfocus,:focus,:focus-visible) * { color:#fff !important; }
 @keyframes ytm-route-enter { from { opacity:.94; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @keyframes ytm-pulse { 0%, 100% { opacity:.68; } 50% { opacity:.32; } }
+@keyframes ytm-backdrop-fadeout { from { opacity:1; } to { opacity:0; } }
+@keyframes ytm-cover-crossfade { from { opacity:0; } to { opacity:1; } }
 .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page { animation:none; }
 .ytm-playlist-shell,.ytm-search-content { animation:ytm-route-enter 110ms cubic-bezier(.22,1,.36,1) both; }
-@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page,.ytm-playlist-shell,.ytm-search-content { animation:none !important; } }
+@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page,.ytm-playlist-shell,.ytm-search-content,.ytm-cover-current,.ytm-atmosphere-prev { animation:none !important; } .ytm-atmosphere-prev { display:none !important; } }
 .ytm-ui .ytm-button { border:1px solid #3b485b; border-radius:8px !important; background:#273446; color:#f4f6fa; min-width:0 !important; max-width:100%; box-sizing:border-box; }
 .ytm-ui .ytm-button:hover { background:#36465b; }
 .ytm-ui .ytm-compact-slider.gpfocus,.ytm-ui .ytm-compact-slider:focus,.ytm-ui .ytm-button:focus,.ytm-ui .ytm-button.gpfocus { outline:none !important; outline-offset:0; border-color:#596572; background-color:#35445a; color:#fff; box-shadow:none !important; }
@@ -152,10 +154,9 @@ export const themeCss = `
 .ytm-ui.ytm-lyrics-view:not(.ytm-immersive) { border:1px solid rgba(var(--ytm-cover-accent),.28); border-radius:12px; background:linear-gradient(135deg,rgba(var(--ytm-cover-accent),.15),rgba(var(--ytm-cover-accent),.04)),rgba(10,14,20,.24) !important; }
 .ytm-ui.ytm-lyrics-view:not(.ytm-immersive) .ytm-reader { border:0 !important; border-radius:10px; background:linear-gradient(135deg,rgba(var(--ytm-cover-accent),.14),rgba(var(--ytm-cover-accent),.04)),rgba(15,20,27,.42); box-shadow:none !important; }
 .ytm-ui .ytm-lyrics-source { margin-top:14px; font-size:10px; line-height:1.5; color:rgba(255,255,255,.42); overflow-wrap:anywhere; }
-.ytm-ui .ytm-lyric-line { min-height:1em; transition:none; }
+.ytm-ui .ytm-lyric-line { min-height:1em; transition:color 340ms cubic-bezier(.22,1,.36,1), text-shadow 340ms cubic-bezier(.22,1,.36,1); }
 .ytm-ui.ytm-immersive .ytm-lyrics-layout { max-width:min(860px,90%) !important; overflow:visible !important; }
 .ytm-ui .ytm-lyric-active { color:#fff; text-shadow:0 2px 18px rgba(0,0,0,.45); }
-.ytm-immersive .ytm-lyric-line:not(.ytm-lyric-active) .ytm-lyric-pair { opacity:.40 !important; }
 .ytm-ui.ytm-immersive .ytm-reader { background:transparent; border:0; border-radius:0; outline:none; box-shadow:none; scrollbar-width:none; mask-image:linear-gradient(transparent,#000 12%,#000 86%,transparent); -webkit-mask-image:linear-gradient(transparent,#000 12%,#000 86%,transparent); }
 .ytm-ui.ytm-immersive .ytm-reader::-webkit-scrollbar { display:none; }
 .ytm-ui.ytm-immersive .ytm-button:focus,.ytm-ui.ytm-immersive .ytm-button.gpfocus { outline:none !important; border-color:rgba(255,255,255,.28); background:rgba(255,255,255,.06); box-shadow:none !important; }

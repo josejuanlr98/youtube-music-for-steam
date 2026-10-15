@@ -41,7 +41,7 @@ async function readerTest(fullScreen,cast,timed=true){
     '../services/audioManager':{getCurrentTrack:()=>({videoId:'song',title:'Song'}),getIsPlaying:()=>true,getIsCastConnected:()=>cast,getCastSenderName:()=>cast?'Phone':null,
       getProgress:()=>({position,duration:30}),getLivePlaybackPosition:()=>position,
       addProgressListener:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},addCastConnectionListener:()=>()=>{},addTrackChangeListener:()=>()=>{},addPlayStateListener:()=>()=>{}},
-    '../services/lyrics':{loadLyrics:async()=>({lyrics:'One\nTwo\nThree',timedLines:timed?lines:undefined}),loadTranslatedLyrics:()=>new Promise(resolve=>translated=resolve)},
+    '../services/lyrics':{retainLyricsReader:()=>()=>{},cachedLyrics:()=>undefined,loadLyrics:async()=>({lyrics:'One\nTwo\nThree',timedLines:timed?lines:undefined}),loadTranslatedLyrics:()=>new Promise(resolve=>translated=resolve)},
     '../services/focus':{focusLyricsReader:()=>()=>{}},'../services/notifications':{suppressFullscreenNotifications:()=>()=>{}},
     '../services/i18n':{useI18n:()=>({t:key=>key,translateLyrics:true,resolvedTranslationLanguage:'es'})},
     '../services/artworkPalette':{useArtworkPalette:()=>['100,120,140','80,90,100','50,60,70']},'../services/lyricsSource':{lyricsSource:()=>''},

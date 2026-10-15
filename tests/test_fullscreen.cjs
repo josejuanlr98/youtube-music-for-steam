@@ -18,6 +18,7 @@ const modules = {
  '../services/audioManager':{getIsCastConnected:()=>false, getCastSenderName:()=>null, addCastConnectionListener:()=>()=>{}, getCurrentTrack:()=>({videoId:'test',title:'Test'}),getIsPlaying:()=>true,getProgress:()=>({position:45}),addProgressListener(){},addTrackChangeListener(){},addPlayStateListener(){return()=>{}},playNext:async()=>{next++},playPrevious:async()=>{previous++},togglePlayback:()=>{toggled++}},
  '../services/lyrics':{},'../services/focus':{},
  '../services/artworkPalette':{useArtworkPalette:()=> ['180,202,220','72,101,137','43,66,96']},'./ArtworkBackdrop':{ArtworkBackdrop:'backdrop'},
+ './CrossfadeArtwork':{CrossfadeArtwork:'artwork'},
  './ThemeScope':{ThemeScope:'theme'},'./OverflowText':{OverflowText:'overflow-text'},'../services/lyricsSource':{lyricsSource:s=>s}
 };
 modules['../services/browseNavigation']={returnBrowseToPlayer:()=>{backs++;returned++;setTimeout(()=>reopened++,140)},backFromBrowse:()=>backs++};

@@ -1,5 +1,16 @@
 # Historial de cambios
 
+## 0.7.7-beta.2
+
+- Decode each new cover before a two-layer crossfade; cancel stale image loads and retire the previous cover after the fade. Preserve the last cover while Cast completes its metadata.
+- Smooth lyric highlights and fractional scrolling, bridge short vocal breaths without highlighting instrumental cues, and avoid instant recentering when translated rows resize.
+- Race YouTube and LRCLIB on a bounded worker pool without waiting for a slower losing provider. Deduplicate both provider requests and requests from multiple readers.
+- Use canonical metadata for Cast tracks that initially arrive without a title, artist or duration; refresh the same video when frontend metadata improves.
+- Show available plain lyrics while timing finishes, promote late synchronized results into cache, and retry temporary failures without caching them as successful results.
+- Keep strict artist/title/duration checks and do not reuse album timing for longer music-video counterparts. Preserve translation Retry and the native fullscreen screensaver protection.
+- Prefetch lyrics only while a reader is mounted, without translating unheard queue items. Existing playlist pagination, audio extraction and Cast transport remain unchanged.
+
+
 ## 0.7.7-beta.1
 
 - Prevent the October 2026 native Steam screensaver from covering fullscreen lyrics, on both battery and AC power, using Steam's actual client settings and protobuf-aware setters.

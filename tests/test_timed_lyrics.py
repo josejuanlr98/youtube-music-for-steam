@@ -96,3 +96,29 @@ class TimedLyricsTests(unittest.TestCase):
         response.json.return_value = {'trackName':'Song', 'artistName':'Artist', 'duration':180, 'syncedLyrics':'[00:01]One\n[00:04]Two'}
         result = LyricsResolver(lambda:api, Mock(return_value=response)).resolve('a', {'title':'Song','artist':'Artist','duration':180})
         self.assertEqual(result['timingSource'], 'lrclib')
+
+    def test_cast_counterpart_and_title_cleaning(self):
+        from ytm_lyrics import clean_lyric_artist, clean_lyric_title
+        self.assertEqual(clean_lyric_artist("ArtistVEVO"), "Artist")
+        self.assertEqual(clean_lyric_artist("Artist - Topic"), "Artist")
+        self.assertEqual(clean_lyric_title("Artist - Song (Official Music Video)", "ArtistVEVO"), "Song")
+        api = Mock()
+        def watch_side_effect(videoId=None, radio=False):
+            if videoId == "omv_id":
+                return {
+                    "lyrics": None,
+                    "tracks": [{
+                        "videoId": "omv_id",
+                        "title": "Song",
+                        "artists": [{"name": "Artist"}],
+                        "duration_seconds": 180,
+                        "counterpart": {"videoId": "atv_id"},
+                    }],
+                }
+            return {"lyrics": "MPLYt_atv", "tracks":[{"videoId":"atv_id","duration_seconds":180}]}
+        api.get_watch_playlist.side_effect = watch_side_effect
+        api.get_lyrics.return_value = {"lyrics": [{"text": "Line 1", "start_time": 1000, "end_time": 3000}, {"text": "Line 2", "start_time": 3500, "end_time": 6000}]}
+        resolver = LyricsResolver(lambda: api)
+        res = resolver.resolve("omv_id", {"title": "Loading...", "artist": "", "duration": 0})
+        self.assertEqual(res["timingSource"], "youtube")
+        self.assertEqual(len(res["timedLines"]), 2)

@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+const jsx=(type,props)=>({type,props});
+function load(file,modules,globals={}){const api={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports:api,require:name=>modules[name]||{},console,...globals});return api}
+const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}};
+const tick=async()=>{for(let n=0;n<8;n++)await Promise.resolve()};
+(async()=>{
+ let calls=[],responses=[];
+ const lyrics=load('src/services/lyrics.ts',{'@decky/api':{call:(...args)=>{calls.push(args);const response=deferred();responses.push(response);return response.promise}}});
+ const track={videoId:'id',title:'Song',artist:'Artist',duration:180};
+ const a=lyrics.loadLyrics('id',track),b=lyrics.loadLyrics('id',track);assert.equal(calls.length,1);responses[0].resolve({lyrics:'one',timedLines:[{text:'one',start:0,end:1}]});await Promise.all([a,b]);
+ await lyrics.loadLyrics('id',{...track,title:'Song (Official Video)'});assert.equal(calls.length,1,'same video reuses verified timing when Cast metadata is enriched');
+ lyrics.clearLyricsCache();const stale=lyrics.loadLyrics('id',track);lyrics.clearLyricsCache();responses[1].resolve({lyrics:'private'});assert((await stale).error);assert.equal(lyrics.cachedLyrics('id',track),undefined,'account changes reject in-flight results');
+ const partial=lyrics.loadLyrics('id',track);responses[2].resolve({lyrics:'plain',timingPending:true});await partial;const upgraded=lyrics.loadLyrics('id',track);assert.equal(calls.length,4,'partial timing is not frozen into the cache');responses[3].resolve({lyrics:'timed',timedLines:[{text:'timed',start:0,end:1}]});await upgraded;
+ lyrics.prefetchTrackLyrics({...track,videoId:'next'});assert.equal(calls.length,4,'closed reader does not generate background lyrics requests');const stop=lyrics.retainLyricsReader();lyrics.prefetchTrackLyrics({...track,videoId:'next'});assert.equal(calls.length,5);responses[4].resolve({lyrics:'next'});await tick();stop();stop();lyrics.prefetchTrackLyrics({...track,videoId:'another'});assert.equal(calls.length,5);
+ console.log('PASS shared lyrics requests, metadata enrichment, account isolation, progressive timing cache and reader-scoped prefetch');
+ // Exercise the actual component loading effect while Cast fills its metadata.
+ let states=[],stateCursor=0,refs=[],refCursor=0,effects=[],effectCursor=0,queued=[];
+ const timers=new Map();let timer=0,viewCalls=[],currentResponse;
+ const react={useState:initial=>{const id=stateCursor++;if(!(id in states))states[id]=typeof initial==='function'?initial():initial;return[states[id],value=>states[id]=typeof value==='function'?value(states[id]):value]},useRef:value=>{const id=refCursor++;return refs[id]??=( {current:value})},useEffect:(fn,deps)=>{const id=effectCursor++,old=effects[id];if(!old||deps.some((value,i)=>value!==old.deps[i])){effects[id]={fn,deps,cleanup:old?.cleanup};if(fn.toString().includes('cachedLyrics'))queued.push(effects[id])}}};
+ const panel=load('src/components/LyricsPage.tsx',{'react/jsx-runtime':{jsx,jsxs:jsx},react,'@decky/ui':{Focusable:'view',DialogButton:'button'},'../services/i18n':{useI18n:()=>({t:key=>key})},'../services/audioManager':{getCurrentTrack:()=>({videoId:'cast',title:'Loading...',artist:'',duration:0}),getIsPlaying:()=>true,getIsCastConnected:()=>true,getCastSenderName:()=>null,getProgress:()=>({duration:180})},'../services/artworkPalette':{useArtworkPalette:()=>['1,2,3','4,5,6','7,8,9']},'../services/lyricColor':{translationColor:()=>''},'../services/lyricsSource':{lyricsSource:()=>''},'../services/lyrics':{cachedLyrics:()=>undefined,loadLyrics:(id,meta)=>{viewCalls.push([id,meta]);currentResponse=deferred();return currentResponse.promise}}},{setTimeout:fn=>{timers.set(++timer,fn);return timer},clearTimeout:id=>timers.delete(id)}).LyricsPanel;
+ const render=()=>{stateCursor=refCursor=effectCursor=0;const tree=panel({fullScreen:false});for(const effect of queued.splice(0)){effect.cleanup?.();effect.cleanup=effect.fn()}return tree};
+ render();currentResponse.resolve({lyrics:null});await tick();render();assert.equal(viewCalls.length,1);
+ states[0]={videoId:'cast',title:'Song',artist:'Artist',duration:180};render();assert.equal(viewCalls.length,2,'same-ID Cast title/artist changes trigger a new lookup');currentResponse.resolve({lyrics:'Ready lyrics'});await tick();let tree=render();assert(JSON.stringify(tree).includes('Ready lyrics'));
+ states[9]=3;render();currentResponse.resolve({error:'Temporary timing failure'});await tick();tree=render();assert(JSON.stringify(tree).includes('Ready lyrics'),'failed timing upgrades must keep an already usable transcript');
+ states[0]={videoId:'next',title:'Next',artist:'Artist',duration:180};render();const old=currentResponse;states[0]={videoId:'last',title:'Last',artist:'Artist',duration:180};render();old.resolve({lyrics:'Stale words'});currentResponse.resolve({lyrics:'Latest words'});await tick();tree=render();assert(JSON.stringify(tree).includes('Latest words'));assert(!JSON.stringify(tree).includes('Stale words'));
+ console.log('PASS actual lyrics component retries enriched Cast metadata and rejects stale responses after rapid track changes');
+})().catch(error=>{console.error(error);process.exitCode=1});

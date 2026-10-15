@@ -1,3 +1,4 @@
+import { CrossfadeArtwork } from './CrossfadeArtwork';
 import { acquireFullscreenPower } from '../services/fullscreenPower';
 import { returnBrowseToPlayer, backFromBrowse } from '../services/browseNavigation';
 import { translationColor } from '../services/lyricColor';
@@ -5,7 +6,7 @@ import { DialogButton, Focusable, GamepadButton, Navigation } from '@decky/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaExpand } from 'react-icons/fa';
 import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, getLivePlaybackPosition, addProgressListener, addPlayStateListener, getIsPlaying, playNext, playPrevious, togglePlayback } from '../services/audioManager';
-import { loadLyrics, loadTranslatedLyrics, type LyricsResult } from '../services/lyrics';
+import { loadLyrics, loadTranslatedLyrics, cachedLyrics, retainLyricsReader, type LyricsResult } from '../services/lyrics';
 import { focusLyricsReader } from '../services/focus';
 
 import { MdCastConnected, MdTranslate } from 'react-icons/md';
@@ -61,6 +62,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   const [activeLine, setActiveLine] = useState(-1);
   const autoScroll = useRef<{ pause():boolean|void; dispose():void; setPlaying?(value:boolean):void } | null>(null);
   useEffect(() => focusLyricsReader(fullScreen ? rootRef.current : scrollRef.current), [fullScreen]);
+  useEffect(() => retainLyricsReader(), []);
   useEffect(() => addTrackChangeListener(setTrack), []);
   useEffect(() => addPlayStateListener(setPlaying), []);
 
@@ -69,42 +71,35 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     setTranslationAttempt(0);
   }, [track?.videoId]);
 
+  const metadataKey = JSON.stringify([track?.title, track?.artist, track?.album, track?.duration]);
   useEffect(() => {
     let alive = true;
-    setLoading(!!track?.videoId);
-    if (attempt === 0) {
-      setResult({});
+    const currentId = track?.videoId;
+    const cached = currentId ? cachedLyrics(currentId, track || undefined) : undefined;
+    const sameSong = result.forVideoId === currentId;
+    setLoading(!!currentId && !cached?.lyrics && !(sameSong && result.lyrics));
+    if (!sameSong) {
+      setResult(cached ? { ...cached, forVideoId:currentId } : {});
       setActiveLine(-1);
       manualScroll.current?.cancel();
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
-    const currentId = track?.videoId;
-    let autoRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     if (currentId) {
-      const liveDur = track.duration || getProgress().duration;
+      const liveDur = track.duration || getProgress?.()?.duration || 0;
       void loadLyrics(currentId, { ...track, duration:liveDur }).then(value => {
         if (!alive) return;
-        setResult({ ...value, forVideoId: currentId });
-        if ((value.error || !value.lyrics) && attempt < 3) {
-          const delay = attempt === 0 ? 1500 : attempt === 1 ? 3500 : 7000;
-          autoRetryTimer = setTimeout(() => { if (alive) setAttempt(a => a + 1); }, delay);
-        }
-      })
-        .catch(() => {
-          if (!alive) return;
-          setResult({ error: 'Could not load lyrics. Please try again.', forVideoId: currentId });
-          if (attempt < 3) {
-            const delay = attempt === 0 ? 1500 : attempt === 1 ? 3500 : 7000;
-            autoRetryTimer = setTimeout(() => { if (alive) setAttempt(a => a + 1); }, delay);
-          }
-        })
-        .finally(() => { if (alive) setLoading(false); });
-    }
-    return () => {
-      alive = false;
-      if (autoRetryTimer) clearTimeout(autoRetryTimer);
-    };
-  }, [track?.videoId, attempt]);
+        const transient = !!value.error;
+        if (!transient || attempt >= 3 && !(sameSong && result.lyrics)) setResult({ ...value, forVideoId:currentId });
+        if ((transient || value.timingPending) && attempt < 3) {
+          retry = setTimeout(() => { if(alive)setAttempt(value => value+1); }, [800,1800,3500][attempt]);
+          // Keep a usable transcript during timing upgrades and brief failures.
+          setLoading(transient && !(sameSong && result.lyrics));
+        } else setLoading(false);
+      }).catch(() => { if(alive){setResult({error:'Could not load lyrics. Please try again.',forVideoId:currentId});setLoading(false);} });
+    } else setLoading(false);
+    return () => { alive=false; if(retry)clearTimeout(retry); };
+  }, [track?.videoId, metadataKey, attempt]);
 
   useEffect(() => {
     let alive = true;
@@ -295,7 +290,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
             {result.timedLines.map((line, index) => <div key={index} data-lyric-index={index}
               className={`ytm-lyric-line${index === activeLine ? ' ytm-lyric-active' : ''}`}
               style={{ display:'block', position:'relative', padding:fullScreen ? '18px 0' : '9px 0', margin:0, lineHeight:1.6, fontWeight:fullScreen ? 650 : 600, whiteSpace:'pre-wrap', color:index === activeLine ? '#fff' : 'rgba(255,255,255,.42)' }}>
-              <div className="ytm-lyric-pair" style={{transform:index === activeLine ? `scale(${fullScreen ? 1.08 : 1.03})` : `scale(${fullScreen ? .90 : .92})`, opacity:index === activeLine ? 1 : .30, transformOrigin:'center', transition:'transform 220ms cubic-bezier(.2,.8,.2,1), opacity 220ms ease-out',color:'#fff'}}>
+              <div className="ytm-lyric-pair" style={{transform:index === activeLine ? `scale(${fullScreen ? 1.08 : 1.03})` : `scale(${fullScreen ? .90 : .92})`, opacity:index === activeLine ? 1 : .30, transformOrigin:'center', transition:'transform 340ms cubic-bezier(.22,1,.36,1), opacity 340ms ease-out',color:'#fff'}}>
                 <span style={{display:'block'}}>{line.text || '\u00a0'}</span>
                 {translatedLines?.[index] && translatedLines[index] !== line.text && <span style={{display:'block',fontFamily:'"YouTube Sans", Roboto, "Noto Sans", Arial, sans-serif',fontSize:fullScreen ? '.76em' : '.70em',fontWeight:550,color:translatedColor,opacity:.92,lineHeight:1.45,letterSpacing:'-.01em',marginTop:4}}><span className="ytm-translation-reveal">{translatedLines[index]}</span></span>}
               </div>
@@ -343,7 +338,7 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
             <SiYoutubemusic className="ytm-cover-logo" size={28} style={{ display:'block', width:'clamp(24px, 2.1vw, 30px)', height:'clamp(24px, 2.1vw, 30px)', minHeight:24, overflow:'visible', color:`rgb(${accent})` }} aria-label="YouTube Music" />
             <svg className="ytm-wordmark" viewBox="27.8 0 42.5 24" aria-hidden="true" style={{ display:'block', height:'clamp(24px, 2.1vw, 30px)', width:'auto', fill:translatedColor, overflow:'visible' }}><path d={MUSIC_WORDMARK_PATH} /></svg>
           </div>}
-          {track?.albumArt ? <div style={{ width: fullScreen ? '100%' : 78, height: fullScreen ? undefined : 78, aspectRatio: '1 / 1', borderRadius: fullScreen ? 12 : 6, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.04)', boxShadow: fullScreen ? '0 16px 56px -6px rgba(0, 0, 0, 0.36), 0 6px 22px -4px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(255, 255, 255, 0.08)' : '0 4px 12px rgba(0, 0, 0, 0.28)' }}><img key={track.videoId} src={artwork} onError={event => { if (event.currentTarget.src !== track.albumArt) event.currentTarget.src = track.albumArt; }} alt="Album art" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover', transform: (/\.ytimg\.com\//.test(artwork) && /\/(?:hq|sd)default\./.test(artwork) && !artwork.includes('sqp=')) ? 'scale(1.35)' : undefined }} /></div>
+          {track?.videoId ? <CrossfadeArtwork src={artwork} fallback={track.albumArt} style={{ width: fullScreen ? '100%' : 78, height: fullScreen ? undefined : 78, aspectRatio: '1 / 1', borderRadius: fullScreen ? 12 : 6, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.04)', boxShadow: fullScreen ? '0 16px 56px -6px rgba(0, 0, 0, 0.36), 0 6px 22px -4px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(255, 255, 255, 0.08)' : '0 4px 12px rgba(0, 0, 0, 0.28)' }} />
             : <div className="ytm-card" style={{ width: '100%', aspectRatio: '1', display: 'grid', placeItems: 'center', borderRadius: fullScreen ? 12 : 6 }}><SiYoutubemusic size={fullScreen ? 84 : 26} /></div>}
           <OverflowTextGroup textKey={`${fullScreen}|${track?.title}|${track?.artist}`}>
           <h2 style={{ fontSize: fullScreen ? 'clamp(18px, 1.8vw, 22px)' : 13, fontWeight: 700, letterSpacing: '-.018em', lineHeight: 1.25, color: '#f8fafc', margin: fullScreen ? '16px 0 5px' : '8px 0 3px', whiteSpace: fullScreen ? 'normal' : undefined, overflowWrap: 'anywhere', overflow: fullScreen ? 'visible' : 'hidden' }}>{track?.title ?? 'Nothing playing'}</h2>

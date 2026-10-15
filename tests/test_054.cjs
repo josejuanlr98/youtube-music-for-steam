@@ -109,6 +109,7 @@ function lyricsTests() {
     '../services/notifications': {},
     '../services/i18n': { useI18n:() => ({ t:key => ({'lyrics.region':'Song lyrics','lyrics.loading':'Loading lyrics…','lyrics.title':'Lyrics','lyrics.fullscreen':'Fullscreen','common.retry':'Retry'}[key] || key) }) },
     '../services/artworkPalette': { useArtworkPalette:() => ['180,202,220','72,101,137','43,66,96'] },
+    './CrossfadeArtwork':{CrossfadeArtwork:'artwork'},
     './ArtworkBackdrop': { ArtworkBackdrop:'backdrop' },
     './ThemeScope': { ThemeScope:'theme' },
     './OverflowText': { OverflowText:'overflow-text' },

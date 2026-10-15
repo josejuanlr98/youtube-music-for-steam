@@ -11,7 +11,7 @@ import { QueueView } from './components/QueueView';
 import { LibraryView } from './components/LibraryView';
 import { SettingsPage } from './components/SettingsPage';
 import { themeCss } from './theme';
-import { clearLyricsCache } from './services/lyrics';
+import { clearLyricsCache, prefetchTrackLyrics } from './services/lyrics';
 import { SearchPage, clearSearchState } from './components/SearchPage';
 import { CatalogPage } from './components/CatalogPage';
 import { CATALOG_ROUTE, clearCatalogCache } from './services/catalog';
@@ -123,11 +123,13 @@ export default definePlugin(() => {
   warmPlayerState();
   let mounted=true;
   const stopPalettePreload = addTrackChangeListener(track => {
+    prefetchTrackLyrics(track);
     if (track?.albumArt) void preloadArtworkPalette(track.albumArt, document);
     if(track&&!getIsCastConnected())void call<[],{urls:string[]}>('get_upcoming_artwork')
       .then(result=>{if(mounted)for(const url of result.urls||[])void preloadArtworkPalette(url,document);}).catch(()=>{});
   });
   const stopQueuePreload=addQueueListener((tracks,position)=>{
+    prefetchTrackLyrics(tracks[position+1]);
     for(const track of tracks.slice(Math.max(0,position+1),Math.max(0,position+1)+2)){
       if(track.albumArt)void preloadArtworkPalette(track.albumArt,document);
     }

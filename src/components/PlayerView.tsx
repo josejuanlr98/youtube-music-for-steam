@@ -1,3 +1,4 @@
+import { CrossfadeArtwork } from './CrossfadeArtwork';
 import { DialogButton, Focusable, Navigation } from '@decky/ui';
 import { call } from '@decky/api';
 import { useEffect, useRef, useState } from 'react';
@@ -106,7 +107,7 @@ export const PlayerView = () => {
             <MdCastConnected size={12} style={{ flexShrink:0 }} /><span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{castSenderName || 'Connected device'}</span>
           </div>}
         <div style={{ display:'flex', gap:11, alignItems:'center', justifyContent:'flex-start', minWidth:0, paddingRight:24 }}>
-          {track?.albumArt ? <img src={track.albumArt} alt="Album art" style={{ width:52, height:52, borderRadius:8, objectFit:'cover', flexShrink:0, boxShadow:'0 5px 14px rgba(0,0,0,0.32)' }} />
+          {track?.videoId ? <CrossfadeArtwork src={track.albumArt || ''} style={{ width:52, height:52, borderRadius:8, flexShrink:0, boxShadow:'0 5px 14px rgba(0,0,0,0.32)' }} />
             : <div style={{ width:52, height:52, borderRadius:8, background:'#344052', display:'grid', placeItems:'center', flexShrink:0 }}><FaMusic size={24} /></div>}
           <OverflowTextGroup textKey={`${track?.title}|${track?.artist}`} style={{ flex:1, minWidth:0, maxWidth:'calc(100% - 63px)', textAlign:'left' }}>
             <div style={{ fontSize:15, fontWeight:700, letterSpacing:'-.015em', lineHeight:1.26, color:'#f8fafc' }}><OverflowText text={track?.title ?? t('player.nothing')} /></div>

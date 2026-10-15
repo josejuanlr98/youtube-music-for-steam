@@ -7,7 +7,15 @@ export function currentLyric(lines: TimedLine[], position: number) {
     if (lines[middle].start <= position) { anchor = middle; low = middle + 1; }
     else high = middle - 1;
   }
-  const active = anchor >= 0 && position < lines[anchor].end && lines[anchor].text.trim() ? anchor : -1;
+  if (anchor < 0 || !lines[anchor].text.trim()) return { anchor, active: -1 };
+  let effectiveEnd = lines[anchor].end;
+  // Bridge short vocal breaths (<= 1.15s) between consecutive sung lines so
+  // the active highlight transitions directly to the next line without pulsing down.
+  if (anchor + 1 < lines.length && lines[anchor + 1].text.trim()) {
+    const gap = lines[anchor + 1].start - effectiveEnd;
+    if (gap > 0 && gap <= 1.15) effectiveEnd = lines[anchor + 1].start;
+  }
+  const active = position < effectiveEnd ? anchor : -1;
   return { anchor, active };
 }
 
@@ -52,9 +60,9 @@ export function followSyncedLyrics(element: HTMLElement, lines: TimedLine[],
   const recenter = () => {
     if (!view || disposed) return;
     view.cancelAnimationFrame(frame);
-    frame = view.requestAnimationFrame(() => update(readPosition(), true, true));
+    frame = view.requestAnimationFrame(() => update(readPosition(), true, !centered));
   };
-  if (view) frame = view.requestAnimationFrame(() => recenter());
+  if (view && !centered) frame = view.requestAnimationFrame(() => recenter());
   const observer = view?.ResizeObserver ? new view.ResizeObserver(recenter) : null;
   observer?.observe(element);
   if (element.firstElementChild) observer?.observe(element.firstElementChild);

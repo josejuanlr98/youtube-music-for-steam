@@ -508,6 +508,9 @@ class Plugin:
         return {"success": True}
 
     async def _unload(self):
+        resolver = getattr(self, '_lyrics_resolver', None)
+        if resolver is not None:
+            resolver.close()
         self._pending_boot_cast_reset = False
         boot_reset = getattr(self, "_boot_reset_task", None)
         if boot_reset:
