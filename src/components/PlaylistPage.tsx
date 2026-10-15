@@ -1,6 +1,6 @@
-import { setBrowseDepth, returnBrowseToPlayer } from '../services/browseNavigation';
+import { setBrowseDepth, returnBrowseToPlayer, backFromBrowse } from '../services/browseNavigation';
 import { call } from '@decky/api';
-import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab } from '@decky/ui';
+import { DialogButton, Focusable, GamepadButton } from '@decky/ui';
 import { useEffect, useRef, useState } from 'react';
 import { FaArrowLeft, FaMusic } from 'react-icons/fa';
 import { MdPlayArrow, MdPlaylistAdd, MdPlaylistPlay } from 'react-icons/md';
@@ -87,19 +87,14 @@ export const PlaylistPage = () => {
     requestBrowseReturn(playlist?.parentView);
     setBrowseDepth((playlist?.returnDepth ?? 1) - 1);
     if (playlist?.origin !== 'route') requestLibraryReturn();
-    Navigation.NavigateBack();
-    if (playlist?.origin === 'route') return;
-    setTimeout(() => {
-      requestLibraryReturn();
-      Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
-    }, 24);
+    void backFromBrowse(rootRef.current, playlist?.origin === 'route' ? undefined : requestLibraryReturn);
   };
   const cancelBack = (event: { preventDefault:()=>void; stopPropagation:()=>void }) => { event.preventDefault(); event.stopPropagation(); back(); };
   useEffect(() => { setBrowseDepth(playlist?.returnDepth ?? 1); }, [playlist]);
   const returnToPlayer = () => {
     if (leaving.current) return;
     leaving.current = true;
-    returnBrowseToPlayer(playlist?.returnDepth ?? 1);
+    void returnBrowseToPlayer(playlist?.returnDepth ?? 1, rootRef.current);
   };
   const actPlaylist = async (mode: PlaylistAction) => {
     if (!playlist || busy.current) return;

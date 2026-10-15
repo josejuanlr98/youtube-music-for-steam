@@ -327,8 +327,10 @@ const CastContent = () => {
 
 export const SettingsPage = () => {
   const { t } = useI18n();
-  return <Focusable noFocusRing style={{width:'100%',height:'100%',minHeight:0}} onCancelActionDescription={t('common.back')}
-    onCancelButton={event => { event.preventDefault(); event.stopPropagation(); returnBrowseToPlayer(); }}>
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = (event: { preventDefault():void; stopPropagation():void }) => { event.preventDefault(); event.stopPropagation(); void returnBrowseToPlayer(1, root.current); };
+  return <Focusable ref={root} noFocusRing style={{width:'100%',height:'100%',minHeight:0}} onCancelActionDescription={t('common.back')}
+    onCancel={cancel} onCancelButton={cancel}>
     <SidebarNavigation
     title="YouTube Music"
     showTitle

@@ -25,12 +25,11 @@ export const themeCss = `
 .ytm-ui .ytm-stop { background:transparent !important; border-color:transparent !important; color:#b8c1cb; }
 .ytm-ui.ytm-player-view .ytm-stop:is(.gpfocus,:focus,:focus-visible,:hover,:active) { background:#46515e !important; color:#fff !important; outline:none !important; box-shadow:none !important; }
 .ytm-ui.ytm-player-view .ytm-stop:is(.gpfocus,:focus,:focus-visible) * { color:#fff !important; }
-@keyframes ytm-view-enter { from { opacity:0; transform:translateY(4px) scale(.992); } to { opacity:1; transform:translateY(0) scale(1); } }
-@keyframes ytm-route-enter { from { opacity:0; transform:scale(.988); } to { opacity:1; transform:scale(1); } }
+@keyframes ytm-route-enter { from { opacity:.94; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 @keyframes ytm-pulse { 0%, 100% { opacity:.68; } 50% { opacity:.32; } }
-.ytm-player-view,.ytm-lyrics-view:not(.ytm-immersive),.ytm-collection { animation:ytm-view-enter 185ms cubic-bezier(.22,1,.36,1) both; }
-.ytm-lyrics-view.ytm-immersive,.ytm-playlist-page,.ytm-search-page { animation:ytm-route-enter 195ms cubic-bezier(.22,1,.36,1) both; }
-@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page { animation:none !important; } }
+.ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page { animation:none; }
+.ytm-playlist-shell,.ytm-search-content { animation:ytm-route-enter 110ms cubic-bezier(.22,1,.36,1) both; }
+@media (prefers-reduced-motion:reduce) { .ytm-player-view,.ytm-lyrics-view,.ytm-collection,.ytm-playlist-page,.ytm-search-page,.ytm-playlist-shell,.ytm-search-content { animation:none !important; } }
 .ytm-ui .ytm-button { border:1px solid #3b485b; border-radius:8px !important; background:#273446; color:#f4f6fa; min-width:0 !important; max-width:100%; box-sizing:border-box; }
 .ytm-ui .ytm-button:hover { background:#36465b; }
 .ytm-ui .ytm-compact-slider.gpfocus,.ytm-ui .ytm-compact-slider:focus,.ytm-ui .ytm-button:focus,.ytm-ui .ytm-button.gpfocus { outline:none !important; outline-offset:0; border-color:#596572; background-color:#35445a; color:#fff; box-shadow:none !important; }

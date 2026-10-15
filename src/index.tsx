@@ -1,3 +1,4 @@
+import { recoverFullscreenPower, releaseFullscreenPower } from './services/fullscreenPower';
 import { staticClasses, DialogButton, Focusable, Navigation, Tabs } from '@decky/ui';
 import { call, definePlugin, routerHook } from '@decky/api';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -109,11 +110,12 @@ TabsContainer.displayName = 'TabsContainer';
 const Content = () => <PlayerProvider><TabsContainer /></PlayerProvider>;
 
 const onSettingsClick = () => {
-  Navigation.CloseSideMenus();
   Navigation.Navigate(SETTINGS_ROUTE);
+  Navigation.CloseSideMenus();
 };
 
 export default definePlugin(() => {
+  void recoverFullscreenPower();
   const stopI18n = initI18nPreferences();
   installThemeStyles();
   const stopNotifications = initNotifications();
@@ -167,6 +169,7 @@ export default definePlugin(() => {
     icon: <SiYoutubemusic />,
     onDismount() {
       mounted=false;
+      void releaseFullscreenPower();
       stopNotifications();
       stopI18n();
       stopPalettePreload();

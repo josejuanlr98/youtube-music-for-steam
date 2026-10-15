@@ -1,8 +1,10 @@
+import { acquireFullscreenPower } from '../services/fullscreenPower';
+import { returnBrowseToPlayer, backFromBrowse } from '../services/browseNavigation';
 import { translationColor } from '../services/lyricColor';
-import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab } from '@decky/ui';
+import { DialogButton, Focusable, GamepadButton, Navigation } from '@decky/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaExpand } from 'react-icons/fa';
-import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, getLivePlaybackPosition, addProgressListener, addPlayStateListener, getIsPlaying, playNext, playPrevious, togglePlayback, setScreensaverInhibited } from '../services/audioManager';
+import { addTrackChangeListener, getCurrentTrack, addCastConnectionListener, getIsCastConnected, getCastSenderName, getProgress, getLivePlaybackPosition, addProgressListener, addPlayStateListener, getIsPlaying, playNext, playPrevious, togglePlayback } from '../services/audioManager';
 import { loadLyrics, loadTranslatedLyrics, type LyricsResult } from '../services/lyrics';
 import { focusLyricsReader } from '../services/focus';
 
@@ -136,66 +138,41 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
     return () => { alive = false; if (retryTimer) clearTimeout(retryTimer); };
   }, [translateLyrics, resolvedTranslationLanguage, result.lyrics, result.timedLines, translationAttempt]);
 
-  // Deck exposes this store in SteamOS. BlockSuspendAction prevents the Deck
-  // from suspending while the dedicated reader is open; the browser wake lock,
-  // D-Bus ScreenSaver inhibition, and periodic activity pulse prevent SteamOS's
-  // ambient photo screensaver from covering the lyrics.
+  // Browser wake lock and suspend protection supplement Steam's native
+  // screensaver settings; synthetic mouse events do not reset Steam's idle clock.
   useEffect(() => {
     if (!fullScreen) return;
+    const releasePower = acquireFullscreenPower();
     let releaseSuspend: (() => void) | undefined;
-    let releaseScreensaver: (() => void) | undefined;
     let wakeLock: WakeLockSentinel | undefined;
     let pending = false;
     let disposed = false;
-    const win = window as any;
+    const doc = rootRef.current?.ownerDocument || document;
     try {
-      const store = win.SuspendResumeStore;
+      const store = (window as any).SuspendResumeStore;
       if (typeof store?.BlockSuspendAction === 'function') releaseSuspend = store.BlockSuspendAction();
-    } catch { /* Deck builds without this store simply use the wake lock. */ }
-    try {
-      if (typeof win.ScreensaverStore?.BlockScreensaverAction === 'function') {
-        releaseScreensaver = win.ScreensaverStore.BlockScreensaverAction();
-      } else if (typeof win.ScreensaverStore?.InhibitScreensaver === 'function') {
-        const token = win.ScreensaverStore.InhibitScreensaver('YouTube Music');
-        if (typeof token === 'function') releaseScreensaver = token;
-      } else if (typeof win.ScreensaverStore?.SetInhibited === 'function') {
-        win.ScreensaverStore.SetInhibited(true);
-        releaseScreensaver = () => win.ScreensaverStore?.SetInhibited?.(false);
-      } else if (typeof win.SteamClient?.System?.InhibitScreensaver === 'function') {
-        win.SteamClient.System.InhibitScreensaver('YouTube Music');
-      }
-    } catch { /* Optional Steam Client screensaver store hooks */ }
-    setScreensaverInhibited?.(true);
-    const keepAliveInterval = typeof setInterval === 'function' ? setInterval(() => {
-      if (disposed || document.visibilityState !== 'visible') return;
-      try {
-        win.ScreensaverStore?.ResetIdleTimer?.();
-        win.SuspendResumeStore?.NotifyUserActivity?.();
-        if (typeof Event === 'function') document.dispatchEvent?.(new Event('mousemove'));
-      } catch {}
-    }, 45000) : undefined;
+    } catch { /* Suspend protection is optional on other Steam clients. */ }
     const acquireWakeLock = async () => {
-      if (disposed || pending || document.visibilityState !== 'visible' || (wakeLock && !wakeLock.released)) return;
+      if (disposed || pending || doc.visibilityState !== 'visible' || (wakeLock && !wakeLock.released)) return;
       pending = true;
       try {
-        if (navigator.wakeLock?.request) {
-          const acquired = await navigator.wakeLock.request('screen');
+        const provider = doc.defaultView?.navigator || navigator;
+        if (provider.wakeLock?.request) {
+          const acquired = await provider.wakeLock.request('screen');
           if (disposed) await acquired.release();
           else wakeLock = acquired;
         }
-      } catch { /* Wake lock is optional; BlockSuspendAction is still active. */ }
+      } catch { /* Native Steam protection remains active if wake lock is unavailable. */ }
       finally { pending = false; }
     };
-    const onVisibility = () => { if (document.visibilityState === 'visible') void acquireWakeLock(); };
-    document.addEventListener('visibilitychange', onVisibility);
+    const onVisibility = () => { if (doc.visibilityState === 'visible') void acquireWakeLock(); };
+    doc.addEventListener('visibilitychange', onVisibility);
     void acquireWakeLock();
     return () => {
       disposed = true;
-      if (keepAliveInterval !== undefined && typeof clearInterval === 'function') clearInterval(keepAliveInterval);
-      document.removeEventListener('visibilitychange', onVisibility);
+      doc.removeEventListener('visibilitychange', onVisibility);
+      releasePower();
       try { releaseSuspend?.(); } catch { /* already released by Steam */ }
-      try { releaseScreensaver?.(); } catch {}
-      setScreensaverInhibited?.(false);
       void wakeLock?.release().catch(() => {});
     };
   }, [fullScreen]);
@@ -292,13 +269,10 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   const leave = onBack ?? (() => {
     if (leaving.current) return;
     leaving.current = true;
-    Navigation.NavigateBack();
-    if (fullScreen) {
-      window.dispatchEvent(new Event('ytm-return-player'));
-      setTimeout(() => Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky), 24);
-    }
+    if (fullScreen) void returnBrowseToPlayer(1, rootRef.current);
+    else void backFromBrowse(rootRef.current);
   });
-  const openFullscreen = () => { Navigation.CloseSideMenus(); Navigation.Navigate(LYRICS_ROUTE); };
+  const openFullscreen = () => { Navigation.Navigate(LYRICS_ROUTE); Navigation.CloseSideMenus(); };
   const rootStyle: CSSProperties = fullScreen
     ? { width: '100%', maxWidth: '100%', minWidth: 0, top: 40, bottom: 40, left: 0, right: 0, minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' as const, padding: '16px clamp(16px, 3vw, 42px)', display: 'flex', flexDirection: 'column' as const, background: '#080b11', position: 'fixed' as const, outline:'none' }
     : { position:'relative', isolation:'isolate', width: '100%', maxWidth: '100%', minWidth: 0, height: '100%', minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' as const, padding: '6px 4px 4px', display: 'flex', flexDirection: 'column' as const, gap: 8, background: '#101823' };
@@ -424,13 +398,4 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
 };
 
 // Kept for compatibility with old route registrations and external callers.
-export const LyricsPage = () => {
-  let returning = false;
-  const back = () => {
-    if (returning) return;
-    returning = true;
-    Navigation.NavigateBack();
-    setTimeout(() => { returning = false; Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky); }, 24);
-  };
-  return <LyricsPanel onBack={back} />;
-};
+export const LyricsPage = () => <LyricsPanel onBack={() => { void returnBrowseToPlayer(); }} />;

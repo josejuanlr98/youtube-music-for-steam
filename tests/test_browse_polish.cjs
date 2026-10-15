@@ -5,40 +5,43 @@ function load(file,modules={},globals={}){
   return exports;
 }
 const jsx=(type,props)=>({type,props}),walk=node=>!node||typeof node!=='object'?[]:[node,...[node.props?.children].flat(Infinity).flatMap(walk)];
-function navigationTests(){
+async function navigationTests(){
   const events=[],timers=[];let backs=0,opens=0;
   const state=load('src/services/playlistNavigation.ts',{}, {window:{dispatchEvent:event=>events.push(event)},Event:class{constructor(type){this.type=type;}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}}});
   const browse=load('src/services/browseNavigation.ts',{
     '@decky/ui':{Navigation:{NavigateBack:()=>backs++,OpenQuickAccessMenu:()=>opens++},QuickAccessTab:{Decky:999}},'./playlistNavigation':state,
   },{setTimeout:fn=>timers.push(fn)});
+  const settle=async()=>{for(let n=0;n<30;n++){await Promise.resolve();const fn=timers.shift();if(fn)fn();}};
   state.requestLibraryReturn();browse.setBrowseDepth(2);
   assert.equal(browse.nextBrowseDepth('route'),3);assert.equal(browse.nextBrowseDepth('library'),1);
   browse.returnBrowseToPlayer(3);browse.returnBrowseToPlayer(3);
+  await Promise.resolve();
   assert.equal(backs,1);assert.equal(opens,0);assert.equal(state.libraryReturnPending(),false);
   assert.equal(state.consumePlayerReturn(),true,'Player intent survives a QAM remount');
-  timers.shift()();assert.equal(backs,2);assert.equal(opens,0);
-  timers.shift()();assert.equal(backs,3);timers.shift()();
+  await settle();assert.equal(backs,3);
   assert.equal(opens,1,'nested pages finish closing before QAM opens');
   assert.equal(state.consumePlayerReturn(),true,'intent is repeated after asynchronous navigation');
   assert.equal(state.consumePlayerReturn(),false);
   state.requestPlayerReturn();
   browse.setBrowseDepth(1);browse.returnBrowseToLibrary();browse.returnBrowseToLibrary();
+  await Promise.resolve();
   assert.equal(backs,4,'Search B closes one route even when delivered twice');
   assert.equal(opens,1,'Library QAM reopens only after the route closes');
   assert.equal(state.consumePlayerReturn(),false,'returning to Library clears an old Player intent');
   assert.equal(state.libraryReturnPending(),true);
   assert.equal(events.at(-1).detail.preserveCategory,true,'Search B keeps the category that launched it');
-  timers.shift()();assert.equal(opens,2);assert.equal(state.libraryReturnPending(),true,'Library intent survives QAM remount');
+  await settle();assert.equal(opens,2);assert.equal(state.libraryReturnPending(),true,'Library intent survives QAM remount');
   const settings=load('src/components/SettingsPage.tsx',{
-    'react/jsx-runtime':{jsx,jsxs:jsx},'@decky/ui':{Focusable:'focusable'},
+    react:{useRef:value=>({current:value})},'react/jsx-runtime':{jsx,jsxs:jsx},'@decky/ui':{Focusable:'focusable'},
     '../services/i18n':{useI18n:()=>({t:key=>key})},'../services/browseNavigation':browse,
   }).SettingsPage();
   let prevented=0,stopped=0;
   const event={preventDefault:()=>prevented++,stopPropagation:()=>stopped++};
   settings.props.onCancelButton(event);settings.props.onCancelButton(event);
   assert.equal(prevented,2);assert.equal(stopped,2,'B does not also invoke Steam default navigation');
+  await Promise.resolve();
   assert.equal(backs,5,'Settings closes once even if B is delivered twice');
-  assert.equal(opens,2);timers.shift()();assert.equal(opens,3,'Settings reopens the plugin after the route closes');
+  assert.equal(opens,2);await settle();assert.equal(opens,3,'Settings reopens the plugin after the route closes');
   assert.equal(state.consumePlayerReturn(),true,'Settings restores Player even when the panel remounts');
   assert.equal(state.libraryReturnPending(),false);
   console.log('PASS nested playback unwinds only plugin pages and restores Player across remounts');
@@ -170,4 +173,4 @@ function translationIconTests(){
   for(const category of ['playlists','albums','songs','artists'])assert.equal(dictionary.translate(`library.${category}Title`),`Your saved ${category}`);
   console.log('PASS saved-library headings identify the user collection explicitly');
 }
-(async()=>{navigationTests();await actionTests();toolbarAndSortTests();sortFocusTests();translationIconTests();})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{await navigationTests();await actionTests();toolbarAndSortTests();sortFocusTests();translationIconTests();})().catch(error=>{console.error(error);process.exitCode=1;});

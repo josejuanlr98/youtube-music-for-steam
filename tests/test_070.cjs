@@ -121,7 +121,7 @@ function catalogueNavigationTests(){
     '../services/catalog':{selectedCatalog:()=>({entry:{kind:'album',id:'album',title:'Album'},origin}),cachedCatalog:()=>({entries}),detailKey:()=>''},
     '../services/i18n':{useI18n:()=>({t:key=>key})},
     '../services/artworkPalette':{useArtworkAccent:()=> '100,100,100'},
-    '../services/browseNavigation':{setBrowseDepth(){}},
+    '../services/browseNavigation':{setBrowseDepth(){},backFromBrowse:(root,requestReturn)=>{backs++;if(requestReturn)timers.push(()=>{requestReturn();opens++;});}},
     '../services/playlistNavigation':{requestLibraryTabReturn:()=>events.push({detail:{preserveCategory:true}})},
   },{window:{dispatchEvent:event=>events.push(event)},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},setTimeout:fn=>timers.push(fn)});
   const event=button=>({detail:{button},preventDefault(){this.prevented=true;},stopPropagation(){}});

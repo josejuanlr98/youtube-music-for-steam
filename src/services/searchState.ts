@@ -13,6 +13,6 @@ export function openSearch(category: CatalogFilter,parentView?:string) {
     snapshot = { ...snapshot, filter:category, page:0 };
   }
   snapshot={...snapshot,parentView};
-  Navigation.CloseSideMenus();
   Navigation.Navigate('/youtube-music-search');
+  Navigation.CloseSideMenus();
 }

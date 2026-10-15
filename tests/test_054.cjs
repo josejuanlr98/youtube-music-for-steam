@@ -93,6 +93,8 @@ function lyricsTests() {
   let back = 0, refs = 0;
   const jsx = (type, props) => ({ type, props });
   const elements = load('src/components/LyricsPage.tsx', {
+    '../services/fullscreenPower': {},
+    '../services/browseNavigation': {backFromBrowse:()=>back++,returnBrowseToPlayer:()=>back++},
     'react/jsx-runtime': { jsx, jsxs:jsx },
     'react': { useState: value => [typeof value === 'function' ? value() : value, () => {}], useEffect() {}, useRef:() => ({ current:refs++ === 0 ? scroll : refs===2 ? {scroll:distance=>{scroll.scrollTop+=distance;}} : null }) },
     '@decky/ui': { DialogButton:'button', Focusable:'div', GamepadButton:{ DIR_UP:9, DIR_DOWN:10, BUMPER_LEFT:5, BUMPER_RIGHT:6 }, Navigation:{ NavigateBack() { back++; }, OpenQuickAccessMenu() {} }, QuickAccessTab:{ Decky:1 } },

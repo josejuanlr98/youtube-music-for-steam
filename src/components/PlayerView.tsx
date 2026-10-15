@@ -97,7 +97,7 @@ export const PlayerView = () => {
 
   return (
     <Focusable ref={viewRef} onSecondaryActionDescription={track && authenticated ? 'Fullscreen lyrics' : undefined}
-      onSecondaryButton={track && authenticated ? event => { event.preventDefault(); event.stopPropagation(); Navigation.CloseSideMenus(); Navigation.Navigate(LYRICS_ROUTE); } : undefined}
+      onSecondaryButton={track && authenticated ? event => { event.preventDefault(); event.stopPropagation(); Navigation.Navigate(LYRICS_ROUTE); Navigation.CloseSideMenus(); } : undefined}
       className="ytm-ui ytm-player-view" style={{ '--ytm-cover-accent':accent, '--ytm-cover-secondary':secondary, '--ytm-cover-tertiary':tertiary, '--ytm-detail-color':detailColor, width:'100%', maxWidth:'100%', minWidth:0, minHeight:0, boxSizing:'border-box', padding:'2px 2px 4px', display:'flex', flexDirection:'column', gap:5 } as React.CSSProperties}>
       <ThemeScope />
       <div className="ytm-card" style={{ position:'relative', padding:'10px 12px', flexShrink:0, minWidth:0 }}>
@@ -121,7 +121,7 @@ export const PlayerView = () => {
       </div>}
       {authReady && !authenticated && !castConnected && <>
         <div className="ytm-muted" style={{ fontSize:11, textAlign:'center' }}>{castNetwork.trusted ? 'On the same network, select this Deck from the Cast menu.' : 'Enable Cast on your trusted network in Settings.'}</div>
-        {!castNetwork.trusted && <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/cast'); }}>{t('player.setupCast')}</DialogButton>}
+        {!castNetwork.trusted && <DialogButton className="ytm-button" onClick={() => { Navigation.Navigate('/youtube-music-settings/cast'); Navigation.CloseSideMenus(); }}>{t('player.setupCast')}</DialogButton>}
       </>}
 
       <div className="ytm-seek-group" style={{ margin:0, minWidth:0 }}>

@@ -33,6 +33,7 @@ async function readerTest(fullScreen,cast,timed=true){
   const motion=load('src/services/readerScroll.ts',{},globals),synced=load('src/services/syncedLyrics.ts',{},globals);
   const lines=[{text:'One',start:0,end:6},{text:'Two',start:7,end:13},{text:'Three',start:14,end:20}];
   component=load('src/components/LyricsPage.tsx',{
+    '../services/fullscreenPower':{acquireFullscreenPower:()=>()=>{}},
     'react/jsx-runtime':{jsx,jsxs:jsx},react,
     '@decky/ui':{Focusable:'focusable',DialogButton:'button',Navigation:{},GamepadButton:{DIR_UP:9,DIR_DOWN:10}},
     '../services/lyricsScroll':load('src/services/lyricsScroll.ts',{},globals),'../services/readerScroll':motion,'../services/syncedLyrics':synced,

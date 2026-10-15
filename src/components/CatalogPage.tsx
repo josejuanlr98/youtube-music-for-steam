@@ -1,5 +1,5 @@
-import { setBrowseDepth, returnBrowseToPlayer } from '../services/browseNavigation';
-import { DialogButton, Focusable, GamepadButton, Navigation, QuickAccessTab, useParams } from '@decky/ui';
+import { setBrowseDepth, returnBrowseToPlayer, backFromBrowse } from '../services/browseNavigation';
+import { DialogButton, Focusable, GamepadButton, useParams } from '@decky/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FaArrowLeft, FaMusic } from 'react-icons/fa';
 import { MdPlayArrow, MdPlaylistAdd, MdPlaylistPlay } from 'react-icons/md';
@@ -56,18 +56,14 @@ function CatalogDetail({selection,selectionKey:key}:{selection:ReturnType<typeof
     requestBrowseReturn(selection?.parentView);
     setBrowseDepth((selection?.returnDepth ?? 1) - 1);
     if(selection?.origin==='library')requestLibraryTabReturn();
-    Navigation.NavigateBack();
-    if(selection?.origin==='library')setTimeout(()=>{
-      requestLibraryTabReturn();
-      Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
-    },24);
+    void backFromBrowse(root.current, selection?.origin === 'library' ? requestLibraryTabReturn : undefined);
   };
   const cancel=(event:{preventDefault:()=>void;stopPropagation:()=>void})=>{event.preventDefault();event.stopPropagation();back();};
   useEffect(() => { setBrowseDepth(selection?.returnDepth ?? 1); }, [selection]);
   const returnToPlayer = () => {
     if (leaving.current) return;
     leaving.current = true;
-    returnBrowseToPlayer(selection?.returnDepth ?? 1);
+    void returnBrowseToPlayer(selection?.returnDepth ?? 1, root.current);
   };
   const act=async(item:CatalogEntry,mode:'play'|'next'|'append')=>{
     if(busy.current)return;busy.current=true;setPending(item.id);setNotice('');

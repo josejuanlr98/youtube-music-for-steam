@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## 0.7.7-beta.1
+
+- Prevent the October 2026 native Steam screensaver from covering fullscreen lyrics, on both battery and AC power, using Steam's actual client settings and protobuf-aware setters.
+- Restore each original timer when fullscreen closes or the plugin unloads. Recover interrupted sessions on the next plugin initialization; preserve manual user changes and already-disabled timers.
+- Replace guessed screensaver APIs, synthetic activity events and X11 assumptions in the lyrics view with a small, serialized native-settings lease. Keep browser wake lock and suspend protection as supplemental safeguards.
+- Smooth B navigation with a short exit animation, actual main-window History completion and destination painting before reopening Quick Access. Preserve nested parent views and unwind Settings sidebar routes safely.
+- Avoid competing root entrance animations and retain the artwork-ready gate to prevent reopening with an old or incomplete palette.
+
+
 ## 0.7.6
 
 - Refresh the Player layout, Cast badge, Music wordmark, artwork sampling and fullscreen background. Add fullscreen progress/time and larger cover art; publish three new Steam Deck screenshots.

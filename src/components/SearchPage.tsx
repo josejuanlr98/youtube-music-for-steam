@@ -24,7 +24,7 @@ export const SearchPage=()=>{
   const {topNext,topPrevious,focusTop,cancelFocus}=usePaginationFocus(list);
   const busy=useRef(false),request=useRef(0),alive=useRef(true),leaving=useRef(false);
   const browse=useBrowseReturn('search',root,list,undefined,!searching,entries);
-  const back=()=>{if(leaving.current)return;leaving.current=true;requestBrowseReturn(snapshot.parentView);returnBrowseToLibrary(1);};
+  const back=()=>{if(leaving.current)return;leaving.current=true;requestBrowseReturn(snapshot.parentView);void returnBrowseToLibrary(1,root.current);};
   const cancel=(event:{preventDefault:()=>void;stopPropagation:()=>void})=>{event.preventDefault();event.stopPropagation();back();};
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;request.current++;};},[]);
   useEffect(()=>{saveSearchState({query,filter,entries,searched:hasSearched,page,parentView:snapshot.parentView});},[query,filter,entries,hasSearched,page]);
@@ -50,7 +50,7 @@ export const SearchPage=()=>{
       else await actCatalogCollection(entry,mode);
       if(!alive.current)return;
       if(mode==='play'||mode==='shuffle'){
-        returnBrowseToPlayer(1);
+        void returnBrowseToPlayer(1,root.current);
       }else setNotice(t('catalog.queued'));
     }catch(cause){if(alive.current)setError(cause instanceof Error?cause.message:t('catalog.connectionError'));}
     finally{busy.current=false;if(alive.current)setPending(null);}

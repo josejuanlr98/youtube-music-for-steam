@@ -42,7 +42,7 @@ export const LibraryView = ({ onSwitchToPlayer }: { onSwitchToPlayer?: () => voi
       {category==='playlists' ? <AccountLibrary onSwitchToPlayer={onSwitchToPlayer} categoryFocusRequest={categoryFocus} onCategoryChange={changeCategory} /> : <CatalogLibrary key={category} category={category} categoryFocusRequest={categoryFocus} onCategoryChange={changeCategory} onPlay={onSwitchToPlayer} />}
     </> : <div className="ytm-empty">
       <strong>{t('library.castOnly')}</strong><p>{t('library.signInHint')}</p>
-      <DialogButton className="ytm-button" onClick={() => { Navigation.CloseSideMenus(); Navigation.Navigate('/youtube-music-settings/auth'); }}>{t('library.signIn')}</DialogButton>
+      <DialogButton className="ytm-button" onClick={() => { Navigation.Navigate('/youtube-music-settings/auth'); Navigation.CloseSideMenus(); }}>{t('library.signIn')}</DialogButton>
     </div>}
   </div>;
 };
@@ -125,8 +125,8 @@ const AccountLibrary = ({ onSwitchToPlayer, onCategoryChange, categoryFocusReque
     const parentView=browse.capture({},'entry:playlist:'+playlist.playlistId);
     if (typeof loadPlaylistData === 'function') void loadPlaylistData(playlist.playlistId, true);
     selectPlaylist({ ...playlist, thumbnail:playlist.playlistId === 'LM' ? LIKED_SONGS_ART : playlist.thumbnail, libraryScrollTop:scroll?.scrollTop ?? 0,parentView });
-    Navigation.CloseSideMenus();
     Navigation.Navigate(PLAYLIST_ROUTE);
+    Navigation.CloseSideMenus();
   };
   const act = async (playlist: PlaylistEntry, mode: PlaylistAction) => {
     if (busy.current) return;

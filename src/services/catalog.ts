@@ -64,12 +64,12 @@ export async function actCatalogCollection(entry:CatalogEntry,mode:PlaylistActio
 export function openCatalog(entry:CatalogEntry,origin:'library'|'route'='route',parentView?:string) {
   if(entry.kind==='playlist') {
     selectPlaylist({playlistId:entry.id,title:entry.title,count:entry.count??null,thumbnail:entry.image||null,libraryScrollTop:0,origin,returnDepth:nextBrowseDepth(origin),parentView});
-    Navigation.CloseSideMenus(); Navigation.Navigate(PLAYLIST_ROUTE); return;
+    Navigation.Navigate(PLAYLIST_ROUTE); Navigation.CloseSideMenus(); return;
   }
   const key=String(++sequence);
   // Retain every ancestor while nested routes are mounted; clear on unload.
   selection.set(key,{entry,origin,returnDepth:nextBrowseDepth(origin),parentView});
-  Navigation.CloseSideMenus(); Navigation.Navigate(CATALOG_ROUTE.replace(':key',key));
+  Navigation.Navigate(CATALOG_ROUTE.replace(':key',key)); Navigation.CloseSideMenus();
 }
 export async function actCatalogSong(entry:CatalogEntry,mode:'play'|'next'|'append') {
   const track=entry.track;

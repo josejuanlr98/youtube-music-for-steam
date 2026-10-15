@@ -9,6 +9,7 @@ const document = {visibilityState:'visible', addEventListener(){}, removeEventLi
 const color={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/lyricColor.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:color});
 const modules = {
  '../services/lyricColor':color,
+ '../services/fullscreenPower':{acquireFullscreenPower:()=>()=>{}},
  'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},
  'react':{useState:v=>[typeof v==='function'?v():v,()=>{}],useRef:()=>({current:null}),useEffect:fn=>effects.push(fn)},
  '@decky/ui':{Focusable:'div',DialogButton:'button',Navigation:{NavigateBack(){backs++},OpenQuickAccessMenu(){reopened++}},GamepadButton:{BUMPER_LEFT:5,BUMPER_RIGHT:6,DIR_UP:9,DIR_DOWN:10},QuickAccessTab:{Decky:1}},
@@ -19,6 +20,7 @@ const modules = {
  '../services/artworkPalette':{useArtworkPalette:()=> ['180,202,220','72,101,137','43,66,96']},'./ArtworkBackdrop':{ArtworkBackdrop:'backdrop'},
  './ThemeScope':{ThemeScope:'theme'},'./OverflowText':{OverflowText:'overflow-text'},'../services/lyricsSource':{lyricsSource:s=>s}
 };
+modules['../services/browseNavigation']={returnBrowseToPlayer:()=>{backs++;returned++;setTimeout(()=>reopened++,140)},backFromBrowse:()=>backs++};
 const result = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/components/LyricsPage.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,{
  exports:result,require:n=>modules[n],document,navigator:{wakeLock:{request:()=>{requests++;return new Promise(resolve=>resolveLock=resolve)}}},
