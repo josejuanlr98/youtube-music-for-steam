@@ -5,6 +5,7 @@ export function cleanArtist(raw?: string): string {
 
 import { spawn } from 'node:child_process';
 import { audioSession } from './audioSession.js';
+import { audioPlaybackUrl } from './audioRelay.js';
 
 export interface AudioInfo {
   videoId: string;
@@ -41,8 +42,8 @@ export function classifyAudioFailure(stderr: string): AudioLookupError {
   return new AudioLookupError('The audio provider could not load a compatible stream. Please retry.');
 }
 
-export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<AudioInfo> {
-  return new Promise((resolve, reject) => {
+export function extractAudioInfo(videoId: string, ytdlpPath: string, useSession = false): Promise<AudioInfo> {
+  return new Promise<AudioInfo>((resolve, reject) => {
     if (Number(process.versions.node.split('.')[0]) < 22) {
       reject(new AudioLookupError('The audio engine needs Node 22 or newer. Reinstall the current plugin ZIP.', 'RUNTIME_UNSUPPORTED'));
       return;
@@ -55,7 +56,9 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
       PYTHONPATH: '',
       XDG_CACHE_HOME: process.env.YTCAST_CACHE_DIR || '/tmp/youtube-music-cast-receiver/cache',
     };
-    const session = audioSession();
+    // Public streams can be rejected when extracted with browser cookies.
+    // Library authentication is independent; retry restricted audio with the session.
+    const session = useSession ? audioSession() : { args: [] as string[], cleanup() {} };
     let proc: ReturnType<typeof spawn>;
     try { proc = spawn(
       ytdlpPath,
@@ -110,7 +113,7 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
                 artist: cleanArtist((data.artist || data.creator || data.uploader || data.channel || 'Unknown') as string),
                 albumArt: data.thumbnail ?? '',
                 duration: data.duration ?? 0,
-                url: data.url ?? '',
+                url: audioPlaybackUrl(data.url),
               });
             } catch (err) {
               reject(new AudioLookupError(`Failed to parse yt-dlp output: ${(err as Error).message}`));
@@ -137,11 +140,17 @@ export function extractAudioInfo(videoId: string, ytdlpPath: string): Promise<Au
           artist: cleanArtist((data.artist || data.creator || data.uploader || data.channel || 'Unknown') as string),
           albumArt: data.thumbnail ?? '',
           duration: data.duration ?? 0,
-          url: data.url ?? '',
+          url: audioPlaybackUrl(data.url),
         });
       } catch (err) {
         reject(new AudioLookupError(`Failed to parse yt-dlp output: ${(err as Error).message}`));
       }
     });
+  }).catch((error: unknown) => {
+    if (!useSession && process.env.YTCAST_BROWSER_AUTH_FILE && error instanceof AudioLookupError &&
+        !['AUDIO_TIMEOUT', 'RUNTIME_UNSUPPORTED', 'AUDIO_ENGINE_FAILED', 'YOUTUBE_BLOCKED'].includes(error.code)) {
+      return extractAudioInfo(videoId, ytdlpPath, true);
+    }
+    throw error;
   });
 }

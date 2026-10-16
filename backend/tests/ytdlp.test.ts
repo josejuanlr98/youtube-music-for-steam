@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { extractAudioInfo, classifyAudioFailure } from '../src/ytdlp.js';
+import { audioPlaybackUrl } from '../src/audioRelay.js';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
@@ -42,20 +43,38 @@ describe('extractAudioInfo', () => {
     vi.unstubAllEnvs();
   });
 
-  it('passes the imported session through a private file and removes it after extraction', async () => {
+  it('uses the imported session only after public lookup fails and cleans it up', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'ytm-extraction-test-'));
     try {
       const auth = join(directory, 'browser.json');
       writeFileSync(auth, JSON.stringify({cookie:'SID=synthetic'}));
       vi.stubEnv('YTCAST_BROWSER_AUTH_FILE', auth);
-      mockSpawn.mockReturnValue(createMockProcess(sampleYtdlpOutput));
+      let cookieFile = '';
+      mockSpawn.mockReturnValueOnce(createMockProcess('', 1)).mockImplementationOnce((_path, args) => {
+        cookieFile = (args as string[])[1];
+        expect(existsSync(cookieFile)).toBe(true);
+        return createMockProcess(sampleYtdlpOutput);
+      });
       const pending = extractAudioInfo('song', '/path/to/yt-dlp');
-      const args = mockSpawn.mock.calls[0][1] as string[];
-      expect(args[0]).toBe('--cookies');
-      expect(existsSync(args[1])).toBe(true);
-      expect(args.join(' ')).not.toContain('synthetic');
+      expect(mockSpawn.mock.calls[0][1]).not.toContain('--cookies');
       await pending;
-      expect(existsSync(args[1])).toBe(false);
+      const args = mockSpawn.mock.calls[1][1] as string[];
+      expect(args[0]).toBe('--cookies');
+      expect(args.join(' ')).not.toContain('synthetic');
+      expect(existsSync(cookieFile)).toBe(false);
+    } finally { vi.unstubAllEnvs(); rmSync(directory, {recursive:true, force:true}); }
+  });
+
+  it('does not send browser cookies for a playable public song', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ytm-public-test-'));
+    try {
+      const auth = join(directory, 'browser.json');
+      writeFileSync(auth, JSON.stringify({cookie:'SID=synthetic'}));
+      vi.stubEnv('YTCAST_BROWSER_AUTH_FILE', auth);
+      mockSpawn.mockReturnValue(createMockProcess(sampleYtdlpOutput));
+      await extractAudioInfo('song', '/path/to/yt-dlp');
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+      expect(mockSpawn.mock.calls[0][1]).not.toContain('--cookies');
     } finally { vi.unstubAllEnvs(); rmSync(directory, {recursive:true, force:true}); }
   });
 
@@ -70,7 +89,7 @@ describe('extractAudioInfo', () => {
       artist: 'Rick Astley',
       albumArt: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
       duration: 212,
-      url: 'https://rr4---sn-example.googlevideo.com/videoplayback?expire=...',
+      url: audioPlaybackUrl('https://rr4---sn-example.googlevideo.com/videoplayback?expire=...'),
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(

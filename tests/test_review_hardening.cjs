@@ -42,7 +42,7 @@ async function dialTests(){
   console.log('PASS real installed DIAL/SSDP identity, restart persistence and fail-closed build patch');
 }
 async function apiTests(){
-  const origin=load('backend/src/localOrigin.ts'),modules={'./localOrigin.js':origin};
+  const origin=load('backend/src/localOrigin.ts'),relay=load('backend/src/audioRelay.ts',{}, {Buffer,AbortController,setTimeout,clearTimeout,fetch}),modules={'./localOrigin.js':origin,'./audioRelay.js':relay};
   const {handleRequest}=load('backend/src/httpServer.ts',modules),{WsManager}=load('backend/src/wsManager.ts',modules);
   const changes=[],messages=[],server=http.createServer((req,res)=>handleRequest(req,res,ctx)),manager=new WsManager(server);
   const jumps=[];

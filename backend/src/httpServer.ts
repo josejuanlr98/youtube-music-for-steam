@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { CastPlayer } from './CastPlayer.js';
 import type { Player as YtPlayer } from 'yt-cast-receiver';
 import { allowedLocalOrigin } from './localOrigin.js';
+import { relayAudio } from './audioRelay.js';
 
 class RequestError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -215,6 +216,11 @@ export function handleRequest(
   if (method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  if (method === 'GET' && url.startsWith('/api/audio?')) {
+    void relayAudio(req, res);
     return;
   }
 

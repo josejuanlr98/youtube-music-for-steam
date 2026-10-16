@@ -135,18 +135,21 @@ class AudioUpdateTests(unittest.TestCase):
         runtime.stage_extractor(bundled, self.path)
         self.assertEqual(runtime.version(self.path), (2026, 8, 19))
 
-    def test_direct_extraction_uses_imported_session_and_cleans_the_jar(self):
+    def test_restricted_extraction_uses_imported_session_and_cleans_the_jar(self):
         from types import SimpleNamespace
         headers = self.path.with_name('browser.json'); headers.write_text(json.dumps({'cookie':'SID=synthetic'}))
         plugin = module.Plugin(); plugin._check_audio_runtime = Mock()
         def extracted(command, **kwargs):
+            if '--cookies' not in command:
+                return SimpleNamespace(returncode=1, stdout='', stderr='Sign in required')
             index = command.index('--cookies')
             self.assertTrue(Path(command[index+1]).exists())
             self.assertNotIn('SID=synthetic', ' '.join(command))
             return SimpleNamespace(returncode=0, stdout='https://audio.test/stream', stderr='')
         with patch.object(module, 'BROWSER_AUTH_FILE', str(headers)), patch.object(module, 'YTDLP_BIN', str(self.path)), patch.object(module.subprocess, 'run', side_effect=extracted) as run:
             self.assertEqual(plugin._get_streaming_url('song'), 'https://audio.test/stream')
-        self.assertFalse(Path(run.call_args.args[0][2]).exists())
+        command = run.call_args.args[0]
+        self.assertFalse(Path(command[command.index('--cookies') + 1]).exists())
 
 
 class AudioFailurePlaybackTests(unittest.IsolatedAsyncioTestCase):
