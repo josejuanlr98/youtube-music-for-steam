@@ -728,11 +728,16 @@ class Plugin:
             ]
 
             with audio_cookies(BROWSER_AUTH_FILE) as cookies:
-                if cookies:
-                    offset = 1 if ytdlp else 3
-                    command[offset:offset] = ['--cookies', cookies]
+                # Public media can be rejected with HTTP 403 when extracted using
+                # browser cookies. Keep account auth for library access, and only
+                # use cookies for audio when an anonymous lookup cannot succeed.
                 result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=25)
                 url = (result.stdout or '').strip().splitlines()[0] if (result.stdout or '').strip() else ''
+                if cookies and (result.returncode != 0 or not url.startswith('http')):
+                    offset = 1 if ytdlp else 3
+                    command[offset:offset] = ['--cookies', cookies]
+                    result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=25)
+                    url = (result.stdout or '').strip().splitlines()[0] if (result.stdout or '').strip() else ''
                 stderr_lower = (result.stderr or '').lower()
                 if (result.returncode != 0 or not url.startswith('http')) and any(
                     token in stderr_lower for token in (
@@ -756,6 +761,9 @@ class Plugin:
                     raise failure
                 return None
             decky.logger.info(f"Got streaming URL for {video_id}")
+            source = urllib.parse.urlsplit(url)
+            if source.scheme == 'https' and (source.hostname or '').endswith('.googlevideo.com'):
+                return 'http://127.0.0.1:39281/api/audio?src=' + urllib.parse.quote(url, safe='')
             return url
         except subprocess.TimeoutExpired:
             raise AudioLookupError('Audio lookup timed out. Check your connection and retry.', 'AUDIO_TIMEOUT', True)
