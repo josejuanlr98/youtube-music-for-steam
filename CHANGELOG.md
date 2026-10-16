@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## 0.7.7
+
+- Support Steam's native screensaver introduced in the October 2026 client update: temporarily disable its battery and AC timers while fullscreen lyrics are open, then restore the exact previous values on exit. Recover interrupted sessions and preserve manual timer changes.
+- Polish cover transitions with decode-before-fade loading and bounded layers. Animate original and translated lyrics together, fade in newly available transcripts and prevent the first-line highlight flash when changing songs. Respect reduced motion.
+- Clear the previous song's backdrop immediately when Nothing playing is shown, and stop ambient background motion while idle.
+- Smooth Back navigation by coordinating a short exit animation with actual Steam route completion and destination painting before reopening Quick Access. Preserve nested view state and controller focus.
+- Reduce lyric lookup latency with bounded parallel providers, shared in-flight requests, successful-result caching and canonical metadata for incomplete Cast tracks. Show plain lyrics while timing is pending; retain strict recording checks and retryable failures.
+- Promote the user-tested beta.3 implementation. Release validation includes 25 frontend suites, 130 Python tests, 56 backend tests, TypeScript checks, production builds and verified installer/source archives. Native screensaver inhibition and restoration, lyric-provider latency and cover crossfades were also checked on Steam Deck during the beta review.
+
 ## 0.7.7-beta.3
 
 - Reset fullscreen's backdrop immediately to its neutral palette on Nothing playing, remove the previous palette overlay and stop ambient motion while idle.

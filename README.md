@@ -38,7 +38,7 @@ Built for **Steam Deck** and **Steam Machine** on SteamOS wherever Decky Loader 
 - **Explore the catalogue:** filter Library and Search by playlists, albums, artists or songs. Open an album's track list, or explore an artist's songs, albums, singles and related artists. New collection lists are paginated, with L2/R2 navigation that returns focus to the first item.
 - **Cast to your Steam system:** receive YouTube and YouTube Music Cast sessions from a phone or another device on your trusted network. Playback state, track changes, and supported controls stay in sync with the sender.
 - **Import your account from Firefox-family browsers:** in Desktop Mode, sign in to YouTube Music in Firefox, Zen, LibreWolf, Waterfox, or Floorp, then use **Import cookies**. Manual request-header import is available for other browsers. The plugin saves the session locally; it never asks for your Google password.
-- **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored backdrop, and requests temporary screen-awake protection while lyrics are open. Optional lyric translation uses a separate language selector and preserves the original lines.
+- **Read along:** use compact or fullscreen lyrics. Fullscreen follows timed lyrics when available, adds a slow cover-colored backdrop, and temporarily prevents Steam's native screensaver from covering the lyrics on battery or AC power. Closing fullscreen restores your previous screensaver timers. Optional lyric translation uses a separate language selector and preserves the original lines.
 - **Keep the experience cohesive:** artwork colors inform the player, library, and lyrics; volume/progress slider thumbs share the light color used by artist names and lyric translations. Track and Cast notifications use Steam's notification system and respect Steamcord's compatible routing when it is active. Manually selected local songs stay quiet; automatic track changes can notify you. With Steamcord in safe mode, its notification appearance, sound policy and streamer settings apply.
 - **Stop cleanly:** Stop ends the Cast session and clears the active queue.
 
@@ -48,6 +48,22 @@ Download the latest installable ZIP from [Releases](https://github.com/josejuanl
 
 Cast works without signing into the plugin. To use account features such as Library, Search, likes, and lyrics, open **Settings → Account** and import a YouTube Music session from a supported Firefox-family browser. The browser must be installed on the SteamOS device, opened in Desktop Mode, and signed into YouTube Music first.
 
+## New in 0.7.7: smoother animations and Steam screensaver compatibility
+
+Fullscreen lyrics now work with Steam's native screensaver introduced in the October 2026 client update. While the reader is open, the plugin temporarily disables the screensaver for both battery and plugged-in use. Leaving fullscreen restores each timer to its previous value, including an already-disabled timer. The plugin also recovers an interrupted fullscreen session on its next initialization and preserves manual timer changes made during a session.
+
+Cover changes fade between decoded images instead of cutting abruptly. Original and translated lyrics animate together, newly loaded lyrics fade in, and the first line no longer flashes when a song changes. Stopping playback clears the previous song's background immediately. Back navigation waits for Steam's destination view to be ready before reopening Quick Access, making returns from lyrics, artists, albums, playlists and Settings smoother. Reduced-motion preferences are respected.
+
+Lyric lookup shares in-flight requests, races bounded YouTube and LRCLIB requests, reuses successful results and fills in incomplete Cast metadata. Plain lyrics can appear while synchronized timing is still being resolved. Strict recording checks remain in place, and temporary errors can be retried. Loading time still depends on the song, provider and connection.
+
+This release promotes the tested 0.7.7 beta.3 code. Native screensaver protection and timer restoration were verified on Steam Deck with the October 2026 stable Steam client. See the [0.7.7 release notes](https://github.com/josejuanlr98/youtube-music-for-steam/releases/tag/v0.7.7) for details and validation.
+
+### Install the runtime ZIP
+
+Install **youtube-music-for-steam-0.7.7.zip** through Decky Developer Options. The **-source.zip is for development**: its editable files are nested in `project/`, with a source-only notice at the archive root so Decky cannot recognize it as a second uncompiled plugin. Do not install GitHub's automatic source archives either.
+
+If an older source ZIP was installed in the past, a second folder with the same plugin name can override the working installation during startup and cause **Failed to fetch dynamically imported module**. Remove that source-only installation from Decky's plugins directory. The actual runtime directory must contain `dist/index.js` and `backend/out/server.cjs`.
+
 ## New in 0.7.6: refined Player and lyrics, Google translation
 
 The Player has a more compact layout, a Cast device badge and refreshed artwork colors. Fullscreen lyrics add a progress bar and time display, larger cover art, a Music wordmark and a darker animated background. Manual lyric browsing resumes after three seconds; untimed lyrics still wait five seconds at the end before looping. Collection navigation starts loading earlier and returns to Quick Access sooner.
@@ -55,12 +71,6 @@ The Player has a more compact layout, a Cast device badge and refreshed artwork 
 The optional translator now tries **Google Translate's no-key GTX endpoint** first, with MyMemory and Apertium retained as fallbacks. Translation remains off by default. This is a best-effort endpoint rather than a configured Google Cloud API subscription: availability, quotas and translation quality can vary. Successful lines persist locally, repeated verses are reused, and rejected Google requests briefly pause further Google calls while fallback providers remain available. Partial failures retain readable originals and expose a retry control.
 
 The release review also restored the neutral idle Player hint, prevented a delayed Cast startup reset from interrupting an active phone session, and corrected translation cache persistence. The installer and compiled sources are verified together. Read the [0.7.6 release notes](https://github.com/josejuanlr98/youtube-music-for-steam/releases/tag/v0.7.6) for validation and limitations.
-
-### Install the runtime ZIP
-
-Install **youtube-music-for-steam-0.7.6.zip** through Decky Developer Options. The **-source.zip is for development**: its editable files are nested in `project/`, with a source-only notice at the archive root so Decky cannot recognize it as a second uncompiled plugin. Do not install GitHub's automatic source archives either.
-
-If an older source ZIP was installed in the past, a second folder with the same plugin name can override the working installation during startup and cause **Failed to fetch dynamically imported module**. Remove that source-only installation from Decky's plugins directory. The actual runtime directory must contain `dist/index.js` and `backend/out/server.cjs`.
 
 ## New in 0.7.5: meticulously optimized track transitions
 
