@@ -95,6 +95,11 @@ const AccountLibrary = ({ onSwitchToPlayer, onCategoryChange, categoryFocusReque
       if(!alive.current||id!==fetchGeneration.current)return;
       if(first.error){setError(first.error);return;}
       setPlaylists(first.playlists||[]);setLoading(false);
+      if (typeof loadPlaylistData === 'function') {
+        for (const item of (first.playlists || []).slice(0, 2)) {
+          if (item?.playlistId) void loadPlaylistData(item.playlistId, true);
+        }
+      }
       if(first.hasMore){
         const complete=await loadPlaylistLibrary();
         if(!alive.current||id!==fetchGeneration.current)return;
@@ -158,7 +163,9 @@ const AccountLibrary = ({ onSwitchToPlayer, onCategoryChange, categoryFocusReque
       focusId={'entry:playlist:'+playlist.playlistId} title={pending === playlist.playlistId ? 'Loading…' : playlist.title}
       subtitle={playlist.count == null ? 'Your favorite songs' : `${playlist.count} songs`}
       image={playlist.playlistId === 'LM' ? LIKED_SONGS_ART : playlist.thumbnail} icon={undefined}
-      editing={editingOrder} disabled={!!pending} onPlay={() => { if (!editingOrder) openPlaylist(playlist); }}
+      editing={editingOrder} disabled={!!pending}
+      onRowFocus={() => { if (!editingOrder && typeof loadPlaylistData === 'function') void loadPlaylistData(playlist.playlistId, true); }}
+      onPlay={() => { if (!editingOrder) openPlaylist(playlist); }}
       playDescription={t('library.open')} endIcon={<MdChevronRight size={20} />} focusRequest={!selectedPlaylist()?.parentView&&libraryReturnPending() && selectedPlaylist()?.playlistId === playlist.playlistId ? returnRequest : undefined}
       actions={editingOrder ? <>
         <RowAction label={t('library.moveUp')} focusRequest={moveFocus.id === playlist.playlistId && moveFocus.direction === -1 ? moveFocus.sequence : undefined} disabled={orderedPlaylists[0]?.playlistId === playlist.playlistId} onClick={() => movePlaylist(playlist.playlistId,-1)}><MdArrowUpward size={18} /></RowAction>

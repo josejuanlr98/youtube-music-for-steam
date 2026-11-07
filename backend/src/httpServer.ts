@@ -22,6 +22,7 @@ interface RouteContext {
   castPlayer: CastPlayer;
   libraryPlayer: YtPlayer;
   isConnected: () => boolean;
+  isAdvertising?: () => boolean;
   senderName: () => string | null;
   disconnectCast: () => Promise<boolean>;
   network: {
@@ -63,6 +64,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
         position,
         duration,
         connected: ctx.isConnected(),
+        advertising: ctx.isAdvertising?.() ?? false,
         senderName: ctx.senderName(),
       };
     },

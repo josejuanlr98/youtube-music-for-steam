@@ -195,6 +195,9 @@ class LyricsResolver:
         return session
 
     def _new_api(self):
+        api = getattr(self._sessions, 'api', None)
+        if api is not None:
+            return api
         from ytmusicapi import YTMusic
         from ytmusicapi.helpers import initialize_headers
         api = YTMusic(requests_session=self._session('youtube'))
@@ -204,6 +207,7 @@ class LyricsResolver:
                 self._headers = initialize_headers()
                 self._headers.setdefault('X-Goog-Visitor-Id', '')
             api.__dict__['base_headers'] = dict(self._headers)
+        self._sessions.api = api
         return api
 
     def _session_get(self, *args, **kwargs):
@@ -212,9 +216,10 @@ class LyricsResolver:
     def _throttle(self):
         with self.lock:
             now = time.monotonic()
-            slot = max(now, self.last_request + .15)
+            slot = max(now, self.last_request + .05) if self.last_request else now
             self.last_request = slot
-        time.sleep(max(0, slot - now))
+        if slot > now:
+            time.sleep(slot - now)
 
     def _lrclib_request(self, endpoint, params):
         if time.time() < self.retry_after:
@@ -331,6 +336,8 @@ class LyricsResolver:
             if session is not None:
                 session.close()
                 del self._sessions.youtube
+            if hasattr(self._sessions, 'api'):
+                del self._sessions.api
             return {}, {}, True
         finally:
             if api is not None and not self._uses_default_api and hasattr(api, '_session'):
@@ -445,7 +452,7 @@ class LyricsResolver:
                         return result
                     if result.get('lyrics') and not best:
                         best = result
-                        plain_deadline = time.monotonic() + .45
+                        plain_deadline = time.monotonic() + .25
                 except Exception:
                     failed = True
         if best:

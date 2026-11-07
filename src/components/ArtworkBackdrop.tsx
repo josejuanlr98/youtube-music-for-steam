@@ -85,7 +85,7 @@ export function ArtworkBackdrop({ palette, animated = false, idle = false }: { p
     if (idle) { setLayers({current:defaultPalette,previous:null}); return; }
     if (palette === defaultPalette) return;
     setLayers(value => value.current.join('|') === paletteKey ? value : {current:palette,previous:value.current});
-    const timer=setTimeout(()=>setLayers(value => value.current.join('|') === paletteKey ? {current:value.current,previous:null} : value),520);
+    const timer=setTimeout(()=>setLayers(value => value.current.join('|') === paletteKey ? {current:value.current,previous:null} : value),260);
     return()=>clearTimeout(timer);
   },[paletteKey,idle]);
   // Clear synchronously: an empty reader must not paint the last song for one frame.
@@ -99,7 +99,7 @@ export function ArtworkBackdrop({ palette, animated = false, idle = false }: { p
       backgroundImage:`radial-gradient(ellipse 35% 45% at 26% 52%, rgba(${primary},.68) 0%, rgba(${primary},.30) 42%, transparent 78%), radial-gradient(ellipse 30% 36% at 68% 26%, rgba(${secondary},.52) 0%, rgba(${secondary},.22) 45%, transparent 78%)` }} />
     <div ref={secondRef} className="ytm-atmosphere-flow" style={{ ...surface,
       backgroundImage:`radial-gradient(ellipse 32% 40% at 72% 68%, rgba(${tertiary},.62) 0%, rgba(${tertiary},.26) 44%, transparent 80%), radial-gradient(ellipse 28% 33% at 42% 80%, rgba(${secondary},.44) 0%, rgba(${secondary},.18) 47%, transparent 79%)` }} />
-    {shown.previous && <div key={paletteKey} className="ytm-atmosphere-prev" style={{ position:'absolute',inset:0,pointerEvents:'none',animation:'ytm-backdrop-fadeout 480ms ease-in-out both',
+    {shown.previous && <div key={paletteKey} className="ytm-atmosphere-prev" style={{ position:'absolute',inset:0,pointerEvents:'none',animation:'ytm-backdrop-fadeout 240ms cubic-bezier(0.2, 0, 0, 1) both',
       background:`radial-gradient(ellipse 75% 90% at 26% 52%,rgba(${shown.previous[0]},.60),transparent 78%),radial-gradient(ellipse 65% 75% at 72% 68%,rgba(${shown.previous[2]},.54),transparent 80%),linear-gradient(125deg,rgb(${dark(shown.previous[0])}),rgb(${dark(shown.previous[2])}))` }} />}
     <div className="ytm-atmosphere-shade" style={{ position:'absolute', inset:0,
       background:'linear-gradient(90deg,rgba(5,8,14,.18),rgba(5,8,14,.30) 54%,rgba(5,8,14,.50)),radial-gradient(ellipse at 50% 50%,transparent 40%,rgba(5,8,14,.38))' }} />

@@ -13,6 +13,7 @@ import {
   getCastSenderName,
   getProgress,
   addProgressListener,
+  syncInitialVolume,
   type TrackInfo,
 } from '../services/audioManager';
 
@@ -44,7 +45,9 @@ export function warmPlayerState(){
     if(revision===authRevision)cachedControls={...cachedControls,authenticated:auth.authenticated,authReady:true};
   }).catch(()=>{});
   void call<[],{shuffle:boolean;repeat:string;volume:number}>('get_playback_state').then(state=>{
-    cachedControls={...cachedControls,shuffle:state.shuffle,repeat:state.repeat as PlayerState['repeat'],volume:state.volume*100};
+    const vol = Math.round(state.volume * 100);
+    cachedControls={...cachedControls,shuffle:state.shuffle,repeat:state.repeat as PlayerState['repeat'],volume:vol};
+    syncInitialVolume?.(vol);
   }).catch(()=>{});
 }
 
@@ -117,12 +120,14 @@ export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
           repeat: string;
           volume: number;
         }>('get_playback_state');
+        const vol = Math.round(ps.volume * 100);
+        syncInitialVolume?.(vol);
         dispatch({
           type: 'UPDATE',
           payload: {
             shuffle: ps.shuffle,
             repeat: ps.repeat as PlayerState['repeat'],
-            volume: ps.volume * 100,
+            volume: vol,
           },
         });
       } catch (e) {

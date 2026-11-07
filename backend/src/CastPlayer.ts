@@ -164,9 +164,9 @@ export class CastPlayer extends Player {
       const state = this.queue.getState();
       const index = this.queue.videoIds.indexOf(state.current?.id ?? '');
       const nextId = index >= 0 ? this.queue.videoIds[index + 1] : undefined;
-      // setAsCurrent() does not refresh the library's cached neighbours after
-      // a Deck queue jump. Do not replay a stale cached next/previous song.
-      if (nextId && !this.queue.isUpdating && state.next?.id !== nextId) return this.playVideoById(nextId);
+      // Always advance using the sender's explicit videoIds when a next item exists,
+      // even if #refreshPreviousNext is still in flight or failed on a slow network.
+      if (nextId) return this.playVideoById(nextId);
       return super.next(AID);
     }
     const position = this.deckOrder.indexOf(this.queue.current?.id ?? '');
@@ -181,7 +181,7 @@ export class CastPlayer extends Player {
       const state = this.queue.getState();
       const index = this.queue.videoIds.indexOf(state.current?.id ?? '');
       const previousId = index > 0 ? this.queue.videoIds[index - 1] : undefined;
-      if (previousId && !this.queue.isUpdating && state.previous?.id !== previousId) return this.playVideoById(previousId);
+      if (previousId) return this.playVideoById(previousId);
       return super.previous(AID);
     }
     const video = this.orderedVideo(this.deckOrder.indexOf(this.queue.current?.id ?? '') - 1);
@@ -249,6 +249,30 @@ export class CastPlayer extends Player {
     this.ytdlpPath = options.ytdlpPath;
     this.ws = options.wsManager;
     this.store = options.dataStore;
+    // Resolve previous/next directly from the active queue in 0ms instead of
+    // waiting on 5 sequential Innertube / markWatched HTTP round-trips during
+    // setPlaylist / next / previous. This makes phone connection and track
+    // changes instant and prevents slow networks from replaying stale neighbours.
+    const upstreamHandler = (this.queue as any)?.requestHandler;
+    if (upstreamHandler && typeof (this.queue as any)?.setRequestHandler === 'function') {
+      const playlist = this.queue;
+      const fastHandler = Object.create(upstreamHandler);
+      fastHandler.getPreviousNextVideosAbortable = async (target: Video, _playlistState: unknown) => {
+        const ids = this.deckOrder ?? playlist.videoIds;
+        const currentIndex = target?.id ? ids.indexOf(target.id) : -1;
+        const client = target?.client;
+        if (currentIndex >= 0 && client) {
+          const prevId = currentIndex > 0 ? ids[currentIndex - 1] : null;
+          const nextId = currentIndex + 1 < ids.length ? ids[currentIndex + 1] : null;
+          const playlistId = target.context?.playlistId;
+          const previous = prevId ? { id: prevId, client, ...(!this.deckOrder ? { context: { playlistId, index: currentIndex - 1 } } : {}) } as Video : null;
+          const next = nextId ? { id: nextId, client, ...(!this.deckOrder ? { context: { playlistId, index: currentIndex + 1 } } : {}) } as Video : null;
+          return { previous, next, autoplay: null };
+        }
+        return { previous: null, next: null, autoplay: null };
+      };
+      (this.queue as any).setRequestHandler(fastHandler);
+    }
     // Load persisted volume
     void this.store.get<Volume>('volume').then((vol) => {
       if (vol) this.currentVolume = vol;
@@ -720,6 +744,8 @@ export class CastPlayer extends Player {
     this.currentDuration = 0;
     if (!this.inPlayTransition) {
       this.ws.broadcast('stop', {});
+    } else {
+      this.ws.broadcast('state', { isPlaying: false, position: 0, duration: 0 });
     }
     return true;
   }

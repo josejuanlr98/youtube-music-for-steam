@@ -6,7 +6,18 @@ import { FaVolumeUp } from 'react-icons/fa';
 import { setAudioVolume, getAudioElement, getIsCastConnected, getAudioVolume, addVolumeListener } from '../services/audioManager';
 
 // Module-level cache — survives tab switches (component remounts)
-let cachedVolume: number | null = null;
+const VOLUME_STORAGE_KEY = 'ytm-volume-v1';
+const loadStoredVolume = (): number | null => {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(VOLUME_STORAGE_KEY) : null;
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? Math.round(parsed) : null;
+  } catch {
+    return null;
+  }
+};
+let cachedVolume: number | null = loadStoredVolume();
 
 // Keep Decky's SliderField so left/right on the gamepad changes the value.
 // The wrapper only removes the stock Quick Access minimum width and padding.
@@ -40,7 +51,9 @@ export const PaddedSlider = (props: SliderFieldProps) => {
 };
 
 export const VolumeSlider = () => {
-  const [displayVolume, setDisplayVolume] = useState<number>(getIsCastConnected() ? getAudioVolume() : cachedVolume ?? 100);
+  const [displayVolume, setDisplayVolume] = useState<number>(() =>
+    getIsCastConnected() ? getAudioVolume() : (cachedVolume ?? getAudioVolume())
+  );
   const apiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch volume from backend on mount (if no cached value)
@@ -51,7 +64,7 @@ export const VolumeSlider = () => {
       try {
         const result = await call<[], { volume: number }>('get_volume');
         if (!alive || getIsCastConnected()) return;
-        const vol = result.volume;
+        const vol = Math.round(result.volume);
         cachedVolume = vol;
         setDisplayVolume(vol);
         setAudioVolume(vol); // sync <audio> element

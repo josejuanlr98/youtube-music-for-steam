@@ -230,6 +230,7 @@ async function main() {
       castPlayer,
       libraryPlayer: castPlayer,
       isConnected: () => receiver.getConnectedSenders().length > 0 || reconnectUntil > Date.now(),
+      isAdvertising: () => advertising,
       senderName: () => activeSenderName ?? receiver.getConnectedSenders()[0]?.name?.trim() ?? null,
       disconnectCast: async () => {
         // Coalesce duplicate Stop requests so an impatient second click cannot

@@ -102,3 +102,8 @@ export function prefetchTrackLyrics(track?: TrackInfo | null) {
   if (!readers || !track?.videoId || !track.title || track.title === 'Loading...' || !track.artist) return;
   void loadLyrics(track.videoId, track);
 }
+/** Prefetch lyrics for the actively playing track so opening Lyrics or Fullscreen is instant. */
+export function prefetchCurrentTrackLyrics(track?: TrackInfo | null) {
+  if (!track?.videoId || !track.title || track.title === 'Loading...' || !track.artist) return;
+  void loadLyrics(track.videoId, track);
+}

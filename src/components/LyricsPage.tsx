@@ -34,6 +34,8 @@ const formatLyricsTime = (sec: number) => {
   const s = Math.max(0, Math.floor(Number.isFinite(sec) ? sec : 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
+const DEFAULT_PALETTE_KEY = '78, 108, 132|54, 74, 92|34, 47, 61';
+let lastActiveLyricsPalette: [string, string, string] | null = null;
 
 /**
  * A compact lyrics reader for Quick Access and a larger reader for the
@@ -176,12 +178,6 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
   useEffect(() => fullScreen ? suppressFullscreenNotifications() : undefined, [fullScreen]);
   useEffect(() => addCastConnectionListener((connected, sender) => setCast({ connected, sender })), []);
   useLayoutEffect(() => {
-    if (loading || !track?.videoId || result.forVideoId !== track.videoId || !result.lyrics || !scrollRef.current) return;
-    const lines = result.timedLines;
-    const move=(top:number,instant:boolean)=>{
-      if(manualScroll.current)manualScroll.current.scrollTo(top,instant);
-      else scrollRef.current?.scrollTo({top,behavior:instant?'auto':'smooth'});
-    };
     const syncProgressBar = (pos?: number) => {
       if (!fullScreen || typeof rootRef.current?.querySelector !== 'function') return;
       const fillEl = rootRef.current.querySelector<HTMLElement>('.ytm-fullscreen-progress-fill');
@@ -193,6 +189,21 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       const pct = dur > 0 ? Math.min(100, Math.max(0, (cur / dur) * 100)) : 0;
       if (fillEl?.style) fillEl.style.width = `${pct.toFixed(1)}%`;
       if (timeEl) timeEl.textContent = dur > 0 ? `${formatLyricsTime(cur)} / ${formatLyricsTime(dur)}` : formatLyricsTime(cur);
+    };
+    syncProgressBar();
+    if (loading || !track?.videoId || result.forVideoId !== track.videoId || !result.lyrics || !scrollRef.current) {
+      if (fullScreen && track?.videoId && typeof rootRef.current?.querySelector === 'function' && typeof window !== 'undefined' && typeof window.setInterval === 'function') {
+        const timer = window.setInterval(() => {
+          if (getIsPlaying() && rootRef.current?.ownerDocument?.visibilityState !== 'hidden') syncProgressBar(getLivePlaybackPosition());
+        }, 150);
+        return () => window.clearInterval(timer);
+      }
+      return;
+    }
+    const lines = result.timedLines;
+    const move=(top:number,instant:boolean)=>{
+      if(manualScroll.current)manualScroll.current.scrollTo(top,instant);
+      else scrollRef.current?.scrollTo({top,behavior:instant?'auto':'smooth'});
     };
     const motion = lines?.length
       ? followSyncedLyrics(scrollRef.current, lines, getLivePlaybackPosition, listener => {
@@ -207,10 +218,15 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
           return () => { unsubscribe(); window.clearInterval(timer); };
         }, index => setHighlight({forVideoId:track.videoId,lines,index}), move)
       : fullScreen ? startLyricsScroll(scrollRef.current, 2000) : null;
-    if (!motion) return;
+    const fallbackTimer = (!lines?.length && fullScreen && typeof rootRef.current?.querySelector === 'function' && typeof window !== 'undefined' && typeof window.setInterval === 'function')
+      ? window.setInterval(() => {
+          if (getIsPlaying() && rootRef.current?.ownerDocument?.visibilityState !== 'hidden') syncProgressBar(getLivePlaybackPosition());
+        }, 150)
+      : undefined;
+    if (!motion) return () => { if (fallbackTimer !== undefined) window.clearInterval(fallbackTimer); };
     if (!lines?.length) (motion as { setPlaying?(value:boolean):void }).setPlaying?.(playing);
     autoScroll.current = motion;
-    return () => { motion.dispose(); autoScroll.current = null; };
+    return () => { if (fallbackTimer !== undefined) window.clearInterval(fallbackTimer); motion.dispose(); autoScroll.current = null; };
   }, [fullScreen, loading, result.forVideoId, result.lyrics, result.timedLines, track?.videoId]);
   useEffect(() => {
     if (!result.timedLines?.length) autoScroll.current?.setPlaying?.(playing);
@@ -228,7 +244,15 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
       .map(element => element.animate([{ opacity:.15, transform:'translateY(4px)' }, { opacity:1, transform:'translateY(0)' }], { duration:260, easing:'ease-out' }));
     return () => animations.forEach(animation => animation.cancel());
   }, [fullScreen]);
-  const palette = useArtworkPalette(track?.albumArt, rootRef);
+  const rawPalette = useArtworkPalette(track?.albumArt, rootRef);
+  if (!track?.videoId) {
+    lastActiveLyricsPalette = null;
+  } else if (rawPalette.join('|') !== DEFAULT_PALETTE_KEY) {
+    lastActiveLyricsPalette = [rawPalette[0], rawPalette[1], rawPalette[2]];
+  }
+  const palette = (track?.videoId && rawPalette.join('|') === DEFAULT_PALETTE_KEY && lastActiveLyricsPalette)
+    ? lastActiveLyricsPalette
+    : rawPalette;
   const accent = palette[0];
   const translatedColor = translationColor(palette[1]);
   const translationIndicator=translateLyrics && <span className="ytm-translation-indicator" role="img" aria-label={t('language.translate')} title={t('language.translate')} style={{color:translatedColor}}><MdTranslate size={fullScreen?22:17} aria-hidden="true"/></span>;
@@ -348,9 +372,9 @@ export const LyricsPanel = ({ onBack, fullScreen = false }: LyricsPanelProps) =>
           <div className="ytm-muted ytm-artist-name" style={{ color:track?.artist?translatedColor:undefined, fontSize: fullScreen ? 14.5 : 11.5, fontWeight: 500, lineHeight: 1.35, whiteSpace: fullScreen ? 'normal' : undefined, overflowWrap: 'anywhere', overflow: fullScreen ? 'visible' : 'hidden' }}>{track?.artist || 'Play a song to see its lyrics.'}</div>
 
           </OverflowTextGroup>
-          {fullScreen && track && <div className="ytm-fullscreen-progress" style={{ marginTop:12, width:'100%' }}>
-            <div style={{ width:'100%', height:3, borderRadius:999, background:`rgba(${accent}, 0.24)`, overflow:'hidden' }}>
-              <div className="ytm-fullscreen-progress-fill" style={{ width:`${initialPct.toFixed(1)}%`, height:'100%', borderRadius:999, background:`rgb(${accent})`, transition:'width 150ms linear' }} />
+          {fullScreen && track && <div key={track.videoId} className="ytm-fullscreen-progress" style={{ marginTop:12, width:'100%' }}>
+            <div style={{ width:'100%', height:4, borderRadius:999, background:`rgba(${accent}, 0.24)`, overflow:'hidden', transition:'background-color 220ms cubic-bezier(0.2, 0, 0, 1)' }}>
+              <div className="ytm-fullscreen-progress-fill" style={{ width:`${initialPct.toFixed(1)}%`, height:'100%', borderRadius:999, background:`rgb(${accent})`, transition:'width 120ms linear, background-color 220ms cubic-bezier(0.2, 0, 0, 1)' }} />
             </div>
             <div className="ytm-fullscreen-progress-time" style={{ marginTop:5, fontSize:10, lineHeight:1.3, color:translatedColor, opacity:.82, fontVariantNumeric:'tabular-nums', letterSpacing:'.02em' }}>
               {initialDur > 0 ? `${formatLyricsTime(initialPos)} / ${formatLyricsTime(initialDur)}` : formatLyricsTime(initialPos)}

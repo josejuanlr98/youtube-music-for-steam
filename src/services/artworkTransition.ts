@@ -48,7 +48,7 @@ export function createArtworkTransition(onFrame: (frame: ArtworkFrame) => void,
         onFrame(frame);
         retire = setTimeout(() => {
           if (!disposed && frame.current === loaded) { frame = { current: loaded, previous: '' }; onFrame(frame); }
-        }, 480);
+        }, 200);
       }).catch(() => { /* Keep the last valid image when a remote cover fails. */ });
     },
     dispose() { disposed = true; generation++; pending?.cancel(); clearTimeout(retire); },

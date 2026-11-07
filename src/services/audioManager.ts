@@ -84,9 +84,26 @@ function notifySender(name: string | null, avatar?: string) {
     castConnectionListeners.forEach(fn => fn(true, name));
   }
 }
+const VOLUME_STORAGE_KEY = 'ytm-volume-v1';
+function readStoredVolume(): number {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(VOLUME_STORAGE_KEY) : null;
+    if (raw !== null) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) return Math.round(parsed);
+    }
+  } catch {}
+  return 100;
+}
+function writeStoredVolume(value: number) {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(VOLUME_STORAGE_KEY, String(Math.round(value)));
+  } catch {}
+}
+
 let progressPosition = 0;
 let progressDuration = 0;
-let volumeValue = 100;
+let volumeValue = readStoredVolume();
 let volumeMuted = false;
 let volumeRevision = 0;
 let lastCastReport = 0;
@@ -100,8 +117,13 @@ function applyVolume(value:number, muted = false) {
   if (!Number.isFinite(value)) return;
   volumeRevision++;
   volumeValue = Math.max(0, Math.min(100, value)); volumeMuted = muted;
+  if (!usesCast()) writeStoredVolume(volumeValue);
   if (audioElement) { audioElement.volume = volumeValue / 100; audioElement.muted = muted; }
   volumeListeners.forEach(fn => fn(getAudioVolume()));
+}
+export function syncInitialVolume(value: number) {
+  if (usesCast() || !Number.isFinite(value)) return;
+  applyVolume(Math.round(value), false);
 }
 
 let trackChangeListeners: Array<(track: TrackInfo | null) => void> = [];
@@ -512,7 +534,7 @@ function onAudioEnded() {
   }
 }
 function onAudioError() {
-  if (stoppingAll || !currentTrack) return;
+  if (stoppingAll || !currentTrack || !trackStreamReady) return;
   if (playbackSource === 'cast') {
     sendCastPlayback('playbackError', { message: 'Audio playback error' });
   } else {
@@ -702,7 +724,10 @@ export function togglePlayback() {
 }
 export async function playNext() {
   if (usesCast()) {
+    playbackGeneration++;
     trackStreamReady = false;
+    stopCastProgress();
+    notifyPlaying(false);
     audioElement?.pause();
     await castPost('/api/next');
     return;
@@ -711,6 +736,8 @@ export async function playNext() {
   const generation = ++playbackGeneration;
   trackStreamReady = false;
   audioElement?.pause();
+  audioElement?.removeAttribute('src');
+  audioElement?.load();
   notifyPlaying(false);
   notifyProgress(0, 0);
   let settled = false;
@@ -733,7 +760,10 @@ export async function playNext() {
 }
 export async function playPrevious() {
   if (usesCast()) {
+    playbackGeneration++;
     trackStreamReady = false;
+    stopCastProgress();
+    notifyPlaying(false);
     audioElement?.pause();
     await castPost('/api/prev');
     return;
@@ -742,6 +772,8 @@ export async function playPrevious() {
   const generation = ++playbackGeneration;
   trackStreamReady = false;
   audioElement?.pause();
+  audioElement?.removeAttribute('src');
+  audioElement?.load();
   notifyPlaying(false);
   notifyProgress(0, 0);
   let settled = false;

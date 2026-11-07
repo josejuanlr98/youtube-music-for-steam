@@ -11,7 +11,7 @@ import { QueueView } from './components/QueueView';
 import { LibraryView } from './components/LibraryView';
 import { SettingsPage } from './components/SettingsPage';
 import { themeCss } from './theme';
-import { clearLyricsCache, prefetchTrackLyrics } from './services/lyrics';
+import { clearLyricsCache, prefetchTrackLyrics, prefetchCurrentTrackLyrics } from './services/lyrics';
 import { SearchPage, clearSearchState } from './components/SearchPage';
 import { CatalogPage } from './components/CatalogPage';
 import { CATALOG_ROUTE, clearCatalogCache } from './services/catalog';
@@ -33,10 +33,11 @@ const SEARCH_ROUTE = '/youtube-music-search';
 const THEME_STYLE_ID = 'ytm-theme-styles';
 const TABS_CSS = `
   #ytm-tabs-container > * { height:100%; display:flex; flex-direction:column; min-height:0; }
-  #ytm-tabs-container [class*="TabHeaderRowWrapper"] { flex-shrink:0 !important; min-height:30px !important; padding:0 !important; margin-bottom:2px !important; }
+  #ytm-tabs-container [class*="TabHeaderRowWrapper"] { flex-shrink:0 !important; min-height:32px !important; padding:2px 4px !important; margin-bottom:4px !important; }
   #ytm-tabs-container [class*="TabContentsScroll"] { flex:1 !important; min-height:0 !important; overflow-y:auto !important; padding:0 0 4px !important; margin-bottom:0 !important; }
   #ytm-tabs-container [class*="Glyphs"] { transform:scale(.65) !important; transform-origin:center center !important; }
-  #ytm-tabs-container [role="tab"][aria-selected="true"] { box-shadow:inset 0 -2px rgba(var(--ytm-cover-accent, 78, 108, 132), .55); }
+  #ytm-tabs-container [role="tab"] { border-radius:999px !important; transition:background-color 180ms cubic-bezier(0.2, 0, 0, 1), color 180ms cubic-bezier(0.2, 0, 0, 1) !important; }
+  #ytm-tabs-container [role="tab"][aria-selected="true"] { background:rgba(var(--ytm-cover-accent, 78, 108, 132), .26) !important; box-shadow:inset 0 -2px rgba(var(--ytm-cover-accent, 78, 108, 132), .85); color:#fff !important; }
 `;
 
 const installThemeStyles = () => {
@@ -99,7 +100,8 @@ const TabsContainer = memo(() => {
     overflow:'hidden',
     boxSizing:'border-box',
     visibility:prepared ? 'visible' : 'hidden',
-    background:`linear-gradient(180deg, rgba(${coverAccent}, .30) 0%, rgba(${coverAccent}, .14) 48%, transparent 100%)`,
+    background:`radial-gradient(125% 75% at 50% 0%, rgba(${coverAccent}, .34) 0%, rgba(${coverAccent}, .14) 52%, transparent 100%)`,
+    transition:'background 240ms cubic-bezier(0.2, 0, 0, 1)',
   } as React.CSSProperties}>
     <Tabs activeTab={activeTab} onShowTab={showTab} tabs={tabItems} />
   </div>;
@@ -123,6 +125,7 @@ export default definePlugin(() => {
   warmPlayerState();
   let mounted=true;
   const stopPalettePreload = addTrackChangeListener(track => {
+    prefetchCurrentTrackLyrics(track);
     prefetchTrackLyrics(track);
     if (track?.albumArt) void preloadArtworkPalette(track.albumArt, document);
     if(track&&!getIsCastConnected())void call<[],{urls:string[]}>('get_upcoming_artwork')

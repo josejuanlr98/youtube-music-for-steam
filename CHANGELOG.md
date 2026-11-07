@@ -1,5 +1,17 @@
 # Historial de cambios
 
+## 0.7.8
+
+- Overhaul the visual design with **Material 3 Expressive** foundations (`14px`–`22px` squircle containers, `999px` pill actions, dynamic tonal surfaces derived from cover artwork palettes, and `cubic-bezier(0.2, 0, 0, 1)` motion curves).
+- Fix poor-connection track switching so changing songs on slow or unstable Wi-Fi never replays the previous song: replace `yt-cast-receiver`'s 5-request `DefaultPlaylistRequestHandler` with a `0 ms` local-queue neighbour resolver, broadcast an immediate transition stop state, and guard stale audio error events.
+- Accelerate lyrics loading by caching thread-local anonymous `YTMusic` instances, removing initial request throttle delays, tightening plain-lyrics fallback timing, and prefetching the actively playing track's lyrics as soon as playback starts.
+- Speed up cover art crossfades (`180 ms cubic-bezier(0.2, 0, 0, 1)`, `200 ms` layer retirement) and backdrop crossfades (`240 ms`).
+- Fix Fullscreen Lyrics progress bar transition glitches by retaining the previous track's artwork palette while the next cover decodes and keying `.ytm-fullscreen-progress` by `track.videoId`.
+- Pre-warm top playlists on Library load, prefetch playlists on controller focus (`onRowFocus`), and mark single-page playlists with filtered unavailable items as complete on the initial preview read.
+- Persist volume in `localStorage` (`ytm-volume-v1`) and synchronize `audioManager` before the first render so the Quick Access volume slider never flashes `100%` on open.
+- Preserve healthy advertising Cast receiver sessions across the 1.5-second boot check for faster phone-to-Deck Cast discovery.
+- Fix session persistence and header/Firefox import reliability (GitHub Issue #3): harden `ytmusicapi` library/cookie/visitorId parsing, inject `X-Goog-Visitor-Id` on pooled `YTMusic` sessions, add WAL-safe SQLite copy fallback and Zen/LibreWolf/Waterfox/Floorp support in `ytm_firefox.py`, and normalize JSON, cURL, Netscape `cookies.txt`, HTTP/2 pseudo-headers, and bare `Cookie:` strings in `load_headers_from_file`.
+
 ## 0.7.7
 
 - Support Steam's native screensaver introduced in the October 2026 client update: temporarily disable its battery and AC timers while fullscreen lyrics are open, then restore the exact previous values on exit. Recover interrupted sessions and preserve manual timer changes.

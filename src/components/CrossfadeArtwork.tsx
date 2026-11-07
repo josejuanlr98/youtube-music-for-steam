@@ -15,6 +15,6 @@ export function CrossfadeArtwork({ src, fallback, style }: { src: string; fallba
   const image: CSSProperties = { position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', display:'block' };
   return <div ref={root} className="ytm-crossfade-artwork" style={{ position:'relative', overflow:'hidden', ...style }}>
     {frame.previous && <img src={frame.previous} alt="" aria-hidden="true" style={{ ...image, transform:crop(frame.previous) }} />}
-    {frame.current && <img key={frame.current} src={frame.current} alt="Album art" className="ytm-cover-current" style={{ ...image, transform:crop(frame.current), animation:frame.previous ? 'ytm-cover-crossfade 420ms ease-in-out both' : undefined }} />}
+    {frame.current && <img key={frame.current} src={frame.current} alt="Album art" className="ytm-cover-current" style={{ ...image, transform:crop(frame.current), animation:frame.previous ? 'ytm-cover-crossfade 180ms cubic-bezier(0.2, 0, 0, 1) both' : undefined }} />}
   </div>;
 }

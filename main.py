@@ -200,6 +200,14 @@ class Plugin:
                           'get_artist_albums', 'get_album', 'search')
         if bulk and isinstance(client, YTMusic):
             headers = dict(client._auth_headers)
+            visitor_id = (
+                getattr(client, 'header', {}).get('X-Goog-Visitor-Id')
+                or headers.get('x-goog-visitor-id')
+                or headers.get('X-Goog-Visitor-Id')
+                or ''
+            )
+            headers.setdefault('X-Goog-Visitor-Id', visitor_id)
+            headers.setdefault('x-goog-visitor-id', visitor_id)
             def read_bulk():
                 session = self._acquire_bulk_session()
                 healthy = True
@@ -332,7 +340,7 @@ class Plugin:
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 with opener.open('http://127.0.0.1:39281/api/state', timeout=2) as response:
                     state = json.loads(response.read(1024 * 1024))
-                return not (state.get('connected') or state.get('isPlaying') or state.get('track'))
+                return not (state.get('connected') or state.get('isPlaying') or state.get('track') or state.get('advertising'))
             if await asyncio.to_thread(receiver_idle) and not self.is_playing and not self.queue:
                 decky.logger.info("Network became active after boot; running deferred Cast receiver restart...")
                 await self.hard_reset()
@@ -561,6 +569,79 @@ class Plugin:
             await asyncio.to_thread(self._try_init_ytmusic)
         return {"authenticated": self.authenticated}
 
+    @staticmethod
+    def _normalize_headers_raw(headers_raw: str) -> str:
+        text = (headers_raw or '').strip().lstrip('\ufeff')
+        if not text:
+            return ''
+        # 1. If the user pasted a JSON object (e.g. browser.json or Copy as fetch headers)
+        if text.startswith('{') and text.endswith('}'):
+            try:
+                obj = json.loads(text)
+                if isinstance(obj, dict):
+                    if 'headers' in obj and isinstance(obj['headers'], dict):
+                        obj = obj['headers']
+                    lines = [f'{k}: {v}' for k, v in obj.items() if isinstance(k, str) and not k.startswith(':') and isinstance(v, str)]
+                    if lines:
+                        if not any(k.lower() == 'user-agent' for k in obj):
+                            lines.append('User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0')
+                        return '\n'.join(lines)
+            except Exception:
+                pass
+        # 2. If the user pasted a cURL command ("Copy as cURL")
+        if text.startswith('curl '):
+            extracted = []
+            for m in re.finditer(r"(?:-H|--header)\s+(['\"])(.*?)\1", text, re.DOTALL):
+                hdr = m.group(2).strip()
+                if ':' in hdr and not hdr.startswith(':'):
+                    extracted.append(hdr)
+            for m in re.finditer(r"(?:-b|--cookie)\s+(['\"])(.*?)\1", text, re.DOTALL):
+                cookie_val = m.group(2).strip()
+                if cookie_val:
+                    extracted.append(f'Cookie: {cookie_val}')
+            if extracted:
+                if not any(h.lower().startswith('user-agent:') for h in extracted):
+                    extracted.append('User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0')
+                return '\n'.join(extracted)
+        # 3. If the user exported a Netscape cookies.txt file
+        cookie_pairs = []
+        raw_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for line in raw_lines:
+            if line.startswith('#') and not line.startswith('#HttpOnly_'):
+                continue
+            normalized_line = line[len('#HttpOnly_'):] if line.startswith('#HttpOnly_') else line
+            parts = normalized_line.split('\t')
+            if len(parts) >= 7 and ('youtube.com' in parts[0] or 'google.com' in parts[0]):
+                name, val = parts[5].strip(), parts[6].strip()
+                if name and val:
+                    cookie_pairs.append(f'{name}={val}')
+        if cookie_pairs and any(p.startswith(('__Secure-3PAPISID=', 'SAPISID=')) for p in cookie_pairs):
+            return (
+                f"Cookie: {'; '.join(cookie_pairs)}\n"
+                "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0\n"
+                "Origin: https://music.youtube.com"
+            )
+        # 4. Standard raw HTTP headers or bare Cookie string: strip HTTP/2 pseudo-headers
+        cleaned_lines = []
+        has_cookie_header = False
+        has_user_agent = False
+        for line in raw_lines:
+            if line.startswith(':') or line.upper().startswith(('POST ', 'GET ', 'HTTP/')):
+                continue
+            if ':' in line:
+                key = line.split(':', 1)[0].strip().lower()
+                if key == 'cookie':
+                    has_cookie_header = True
+                elif key == 'user-agent':
+                    has_user_agent = True
+                cleaned_lines.append(line)
+            elif ('__Secure-3PAPISID=' in line or 'SAPISID=' in line) and '=' in line:
+                has_cookie_header = True
+                cleaned_lines.append(f'Cookie: {line}')
+        if has_cookie_header and not has_user_agent:
+            cleaned_lines.append('User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0')
+        return '\n'.join(cleaned_lines) if cleaned_lines else text
+
     async def load_headers_from_file(self, file_path: str):
         """Read browser request headers from a text file on the Deck.
         Uses ytmusicapi.setup() to parse raw headers into browser.json.
@@ -568,18 +649,32 @@ class Plugin:
         self._auth_generation += 1
         generation = self._auth_generation
         try:
-            if not os.path.exists(file_path):
+            resolved_path = file_path
+            if not os.path.exists(resolved_path) and file_path == DEFAULT_HEADERS_PATH:
+                user_home = getattr(decky, 'DECKY_USER_HOME', '/home/deck')
+                for candidate_path in (
+                    os.path.join(user_home, 'yt-music-headers.txt'),
+                    os.path.join(user_home, 'yt-music-headers.txt.txt'),
+                    os.path.join(user_home, 'Downloads', 'yt-music-headers.txt'),
+                    os.path.join(user_home, 'Downloads', 'yt-music-headers.txt.txt'),
+                    os.path.join(user_home, 'Desktop', 'yt-music-headers.txt'),
+                ):
+                    if os.path.exists(candidate_path):
+                        resolved_path = candidate_path
+                        break
+            if not os.path.exists(resolved_path):
                 return {"error": f"File not found: {file_path}"}
 
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(resolved_path, "r", encoding="utf-8", errors="replace") as f:
                 headers_raw = f.read()
 
             if not headers_raw.strip():
                 return {"error": "File is empty"}
 
+            normalized = self._normalize_headers_raw(headers_raw)
             from ytmusicapi import setup
             # Parse and validate before replacing a working account or its file.
-            parsed = json.loads(setup(headers_raw=headers_raw))
+            parsed = json.loads(setup(headers_raw=normalized))
             return await self._install_browser_auth(parsed, generation)
         except Exception as e:
             decky.logger.warning(f'Header validation failed: {type(e).__name__}')
@@ -625,7 +720,10 @@ class Plugin:
                 candidate = YTMusic(parsed)
                 if candidate.auth_type != AuthType.BROWSER:
                     raise ValueError('Browser authentication required')
-                candidate.get_library_playlists(limit=1)
+                try:
+                    candidate.get_library_playlists(limit=1)
+                except (KeyError, IndexError, TypeError):
+                    candidate.get_liked_songs(limit=1)
                 return candidate
             candidate = await asyncio.to_thread(validate)
             if generation != self._auth_generation:
@@ -1813,7 +1911,8 @@ class Plugin:
                           else self._api_call('get_playlist', playlist_id, limit=limit))
             if self.ytmusic is not client:
                 return {'error': 'Account changed. Please reload Library.'}
-            tracks = [track for item in (data.get('tracks') or []) if (track := self._playlist_track(item))]
+            raw_tracks = data.get('tracks') or []
+            tracks = [track for item in raw_tracks if (track := self._playlist_track(item))]
             if not tracks:
                 return {'error': 'This playlist has no available songs.'}
             cache = {key: value for key, value in cache.items()
@@ -1821,7 +1920,7 @@ class Plugin:
             while len(cache) >= 8:
                 cache.pop(next(iter(cache)))
             track_count = data.get('trackCount')
-            is_complete = limit is None or (isinstance(track_count, int) and 0 < track_count <= len(tracks))
+            is_complete = limit is None or (isinstance(track_count, int) and 0 < track_count <= len(raw_tracks))
             if is_complete:
                 cache[playlist_id] = (client, time.monotonic(), [dict(track) for track in tracks])
             self._playlist_tracks_cache = cache
